@@ -1,3 +1,4 @@
+import java.time.Instant
 import java.util.Properties
 
 plugins {
@@ -38,8 +39,16 @@ android {
         applicationId = "com.aria2ngnext"
         minSdk = 24
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
+        // UTC build stamp for the About page — distinguishes same-version builds.
+        // Config-time value: a config-cache hit reuses it, which is fine —
+        // unchanged config means the same binary anyway.
+        buildConfigField(
+            "String",
+            "BUILD_TIME_UTC",
+            "\"${Instant.now().toString().substringBefore('.')}Z\"",
+        )
     }
 
     buildTypes {

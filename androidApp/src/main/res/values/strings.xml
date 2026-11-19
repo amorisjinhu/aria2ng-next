@@ -116,6 +116,7 @@
 
     <!-- About -->
     <string name="app_version">App version</string>
+    <string name="build_time">Build time</string>
     <string name="engine_version_label">Engine</string>
     <string name="aria2_next_version">aria2-next %1$s</string>
     <string name="engine_stopped">stopped</string>

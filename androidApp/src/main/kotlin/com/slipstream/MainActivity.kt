@@ -213,6 +213,7 @@ class MainActivity : ComponentActivity() {
                             text = {
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     DetailRow(stringResource(R.string.app_version), versionName)
+                                    DetailRow(stringResource(R.string.build_time), BuildConfig.BUILD_TIME_UTC)
                                     DetailRow(
                                         stringResource(R.string.engine_version_label),
                                         engineVersion?.let { stringResource(R.string.aria2_next_version, it) }

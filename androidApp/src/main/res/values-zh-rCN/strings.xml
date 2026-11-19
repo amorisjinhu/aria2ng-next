@@ -116,6 +116,7 @@
 
     <!-- About -->
     <string name="app_version">应用版本</string>
+    <string name="build_time">构建时间</string>
     <string name="engine_version_label">引擎</string>
     <string name="aria2_next_version">aria2-next %1$s</string>
     <string name="engine_stopped">已停止</string>
