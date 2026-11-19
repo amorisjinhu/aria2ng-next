@@ -321,12 +321,21 @@ fun DownloadScreen(
     fun deleteBatch(withFiles: Boolean) {
         val targets = downloads.filter { it.gid in selected }
         rpcOp {
+            var failed = 0
             targets.forEach { d ->
-                if (d.status in setOf(Download.Status.ACTIVE, Download.Status.WAITING, Download.Status.PAUSED)) {
-                    runCatching { engine.manager.remove(d.gid) }
-                }
+                val live = d.status in setOf(Download.Status.ACTIVE, Download.Status.WAITING, Download.Status.PAUSED)
+                // File wipe is only safe once the task is actually gone —
+                // deleting payload out from under a live aria2 write loses data.
+                val stopped =
+                    !live ||
+                        runCatching { engine.manager.remove(d.gid) }
+                            .onFailure { failed++ }
+                            .isSuccess
                 runCatching { engine.manager.clearResult(d.gid) }
-                if (withFiles) deleteDownloadFiles(d)
+                if (withFiles && stopped) deleteDownloadFiles(d)
+            }
+            if (failed > 0) {
+                snackbarHostState.showSnackbar(context.getString(R.string.del_partial, failed))
             }
         }
         selected = emptySet()
@@ -855,8 +864,15 @@ private fun DownloadDetailDialog(
                             shaScope.launch {
                                 shaResult = null
                                 shaPct = 0
-                                shaResult = sha256Hex(primaryPath) { shaPct = it }
+                                shaResult =
+                                    runCatching { sha256Hex(primaryPath) { shaPct = it } }
+                                        .getOrNull()
                                 shaPct = -1
+                                if (shaResult == null) {
+                                    Toast
+                                        .makeText(ctx, ctx.getString(R.string.sha_failed), Toast.LENGTH_SHORT)
+                                        .show()
+                                }
                             }
                         },
                     ) { Text("SHA-256") }
@@ -883,9 +899,17 @@ private fun openLocalFile(
         Toast.makeText(ctx, ctx.getString(R.string.file_missing), Toast.LENGTH_SHORT).show()
         return
     }
+    // getUriForFile throws IllegalArgumentException when no <paths> root
+    // matches (e.g. a secondary SD-card volume) — it must be inside the guard.
     val uri =
-        androidx.core.content.FileProvider
-            .getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+        runCatching {
+            androidx.core.content.FileProvider
+                .getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+        }.getOrNull()
+    if (uri == null) {
+        Toast.makeText(ctx, ctx.getString(R.string.open_failed), Toast.LENGTH_SHORT).show()
+        return
+    }
     val mime =
         android.webkit.MimeTypeMap
             .getSingleton()
@@ -942,11 +966,15 @@ private suspend fun deleteDownloadFiles(d: Download) =
                 f.delete()
                 File("$p.aria2").delete()
                 if (d.dir.isNotEmpty()) {
-                    var parent = f.parentFile
+                    // Canonical paths + trailing separator: "/a/bc" must NOT
+                    // match root "/a/b" (bare startsWith would delete a
+                    // sibling's empty dirs).
+                    val rootPath = File(d.dir).canonicalPath
+                    var parent = f.canonicalFile.parentFile
                     while (
                         parent != null &&
-                        parent.absolutePath != d.dir &&
-                        parent.absolutePath.startsWith(d.dir)
+                        parent.canonicalPath != rootPath &&
+                        parent.canonicalPath.startsWith("$rootPath/")
                     ) {
                         if (!parent.delete()) break // non-empty → stop
                         parent = parent.parentFile

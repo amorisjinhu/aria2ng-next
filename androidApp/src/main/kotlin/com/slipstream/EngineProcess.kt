@@ -134,7 +134,7 @@ class EngineProcess private constructor(
             }
 
             val args = mutableListOf(exec.absolutePath) + spec.args(session.absolutePath)
-            Log.i(TAG, "exec: ${args.joinToString(" ")}")
+            Log.i(TAG, "exec: ${args.joinToString(" ") { a -> if (a.startsWith("--rpc-secret=")) "--rpc-secret=***" else a }}")
 
             val spawned =
                 ProcessBuilder(args)

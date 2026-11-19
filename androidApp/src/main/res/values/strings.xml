@@ -40,6 +40,9 @@
     <string name="open_file">Open</string>
     <string name="no_app">No app can open this file</string>
     <string name="file_missing">File not found on storage</string>
+    <string name="open_failed">Can\'t open: this location isn\'t shareable</string>
+    <string name="sha_failed">Verification failed: file unreadable</string>
+    <string name="del_partial">%1$d item(s) still active — files kept</string>
     <string name="computing">computing %1$d%%…</string>
     <string name="copy">Copy</string>
 

@@ -40,6 +40,9 @@
     <string name="open_file">打开</string>
     <string name="no_app">没有可打开此文件的应用</string>
     <string name="file_missing">存储中找不到该文件</string>
+    <string name="open_failed">无法打开：此位置不支持分享</string>
+    <string name="sha_failed">校验失败：文件不可读</string>
+    <string name="del_partial">%1$d 项仍存活——已跳过文件删除</string>
     <string name="computing">计算中 %1$d%%…</string>
     <string name="copy">复制</string>
 

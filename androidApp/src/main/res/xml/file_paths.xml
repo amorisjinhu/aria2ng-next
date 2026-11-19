@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- App-private + shared storage; downloads can live in either -->
+    <!-- App-private + shared storage; downloads can live in either.
+         root-path covers secondary volumes (SD cards) that none of the
+         scoped tags reach — grants stay per-URI, minted only for downloads. -->
     <files-path name="files" path="." />
     <external-files-path name="external_files" path="." />
     <external-path name="storage" path="." />
+    <root-path name="root" path="." />
 </paths>
