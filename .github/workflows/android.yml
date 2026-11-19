@@ -1,0 +1,86 @@
+name: android-ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      # compileSdk 37 — install the platform explicitly so AGP doesn't race it
+      - name: Android SDK platform
+        run: yes | sdkmanager "platforms;android-37" >/dev/null
+
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew ktlintCheck assembleDebug assembleRelease --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-debug
+          path: androidApp/build/outputs/apk/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-release
+          path: androidApp/build/outputs/apk/release/*.apk
+
+  # Tag builds publish a GitHub release with the *real-key signed* APK.
+  # The unsigned-artifact build above stays as a smoke check; this job
+  # rebuilds with the keystore restored from repo secrets.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Android SDK platform
+        run: yes | sdkmanager "platforms;android-37" >/dev/null
+
+      - name: Restore release keystore
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          echo "$RELEASE_KEYSTORE_B64" | base64 -d > release.jks
+          printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$RELEASE_STORE_PASSWORD" "$RELEASE_KEY_ALIAS" "$RELEASE_KEY_PASSWORD" \
+            > keystore.properties
+
+      - name: Build signed release
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          apk="aria2ng-next-${{ github.ref_name }}.apk"
+          mv androidApp/build/outputs/apk/release/androidApp-release.apk "$apk"
+          gh release create "${{ github.ref_name }}" "$apk" \
+            --title "aria2ng-next ${{ github.ref_name }}" --generate-notes --verify-tag
