@@ -411,7 +411,15 @@ fun DownloadScreen(
                             }
                             Spacer(Modifier.weight(1f))
                             TextButton(onClick = {
-                                if (state is EngineProcess.State.Running) engine.stop() else engine.start()
+                                // Route through the service: it owns wantRunning
+                                // + the foreground state — a bare engine.stop()
+                                // leaves the FGS spinning and lets a STICKY
+                                // restart resurrect the engine.
+                                if (state is EngineProcess.State.Running) {
+                                    EngineService.stop(context)
+                                } else {
+                                    EngineService.start(context)
+                                }
                             }) {
                                 Text(
                                     when (state) {

@@ -3,6 +3,7 @@ package com.slipstream
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -184,19 +185,20 @@ fun SettingsScreen(
             TextButton(onClick = {
                 dir = "/storage/emulated/0/Download"
                 if (Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) {
-                    ctx.startActivity(
-                        android.content.Intent(
-                            android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                            android.net.Uri.parse("package:${ctx.packageName}"),
-                        ),
-                    )
+                    openAllFilesAccess(ctx)
                 }
             }) { Text(stringResource(R.string.use_public_download)) }
             if (isPublicDir && !storageGranted) {
+                // Tap-through to the grant page — a bare warning leaves users stuck
                 Text(
                     stringResource(R.string.storage_warning),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
+                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                    modifier =
+                        Modifier.clickable {
+                            if (Build.VERSION.SDK_INT >= 30) openAllFilesAccess(ctx)
+                        },
                 )
             }
         }
@@ -308,4 +310,14 @@ private fun SettingSwitch(
             Switch(checked = checked, onCheckedChange = onChange)
         }
     }
+}
+
+/** Jump to this app's "All files access" grant page (API 30+). */
+private fun openAllFilesAccess(ctx: android.content.Context) {
+    ctx.startActivity(
+        android.content.Intent(
+            android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            android.net.Uri.parse("package:${ctx.packageName}"),
+        ),
+    )
 }

@@ -95,7 +95,7 @@ class DownloadManager(
         // Serialized: a slower refresh can't overwrite a newer snapshot
         refreshMutex.withLock {
             try {
-                val all = client.tellActive() + client.tellWaiting() + client.tellStopped()
+                val all = client.tellActive() + client.tellAllWaiting() + client.tellAllStopped()
                 val stat = client.getGlobalStat()
                 // stop() may have cancelled us during the RPCs and cleared the
                 // flows — don't write a stale snapshot back over that clear.

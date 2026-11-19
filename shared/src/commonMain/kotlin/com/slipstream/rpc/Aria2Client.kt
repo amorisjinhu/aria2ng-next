@@ -280,6 +280,24 @@ class Aria2Client(
         num: Int = 100,
     ): List<JsonObject> = call("aria2.tellStopped", pageParams(offset, num)).jsonArray.map { it.jsonObject }
 
+    // Single calls cap at `num`; aria2's own result cap is far higher —
+    // page until a short read so deep queues don't silently drop off the UI.
+    suspend fun tellAllWaiting(): List<JsonObject> = paged { o, n -> tellWaiting(o, n) }
+
+    suspend fun tellAllStopped(): List<JsonObject> = paged { o, n -> tellStopped(o, n) }
+
+    private suspend fun paged(fetch: suspend (Int, Int) -> List<JsonObject>): List<JsonObject> {
+        val out = mutableListOf<JsonObject>()
+        var offset = 0
+        while (out.size < 10_000) {
+            val page = fetch(offset, PAGE_SIZE)
+            out += page
+            if (page.size < PAGE_SIZE) break
+            offset += PAGE_SIZE
+        }
+        return out
+    }
+
     suspend fun getGlobalStat(): GlobalStat = GlobalStat.fromJson(call("aria2.getGlobalStat").jsonObject)
 
     suspend fun getOption(gid: String): Map<String, String> =
@@ -373,6 +391,8 @@ class Aria2Client(
     ) : Exception("aria2 error $code: $message")
 
     companion object {
+        private const val PAGE_SIZE = 100
+
         private val STATUS_KEYS =
             JsonArray(
                 listOf(
