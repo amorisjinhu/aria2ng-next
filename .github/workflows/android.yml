@@ -17,9 +17,11 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # Runner image ships cmdline-tools + ANDROID_HOME already; just add the platform
+      # Runner image ships cmdline-tools under ANDROID_HOME (not on PATH)
       - name: Android SDK platform
-        run: yes | sdkmanager "platforms;android-37" >/dev/null
+        run: |
+          SDKMANAGER=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$SDKMANAGER" "platforms;android-37" >/dev/null
 
       - name: Build
         run: |
@@ -53,7 +55,9 @@ jobs:
           java-version: "21"
 
       - name: Android SDK platform
-        run: yes | sdkmanager "platforms;android-37" >/dev/null
+        run: |
+          SDKMANAGER=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$SDKMANAGER" "platforms;android-37" >/dev/null
 
       - name: Restore release keystore
         env:
