@@ -33,6 +33,7 @@ class SettingsRepo(
     suspend fun ensureDefaults() =
         context.settingsStore.edit { p ->
             if (p[RPC_TOKEN].isNullOrBlank()) p[RPC_TOKEN] = randomToken()
+            if (p[EXT_TOKEN].isNullOrBlank()) p[EXT_TOKEN] = randomToken()
         }
 
     val spec: Flow<EngineSpec> =
@@ -80,6 +81,25 @@ class SettingsRepo(
                 }
         }
 
+    /** Extension-API prefs — consumed by updateExtApi, never restarts the engine. */
+    val extSpec: Flow<ExtApiSpec> =
+        context.settingsStore.data.map { p ->
+            ExtApiSpec(
+                enabled = p[EXT_ENABLED] ?: true,
+                port = p[EXT_PORT] ?: BuildConfig.DEFAULT_EXT_PORT,
+                token = p[EXT_TOKEN] ?: "",
+                listenAll = p[EXT_LISTEN_ALL] ?: false,
+            )
+        }
+
+    suspend fun saveExt(spec: ExtApiSpec) =
+        context.settingsStore.edit {
+            it[EXT_ENABLED] = spec.enabled
+            it[EXT_PORT] = spec.port
+            it[EXT_TOKEN] = spec.token
+            it[EXT_LISTEN_ALL] = spec.listenAll
+        }
+
     /** UI-only pref — theme changes must not restart the engine. */
     val themeMode: Flow<Int> = context.settingsStore.data.map { it[THEME_MODE] ?: 0 }
 
@@ -119,5 +139,9 @@ class SettingsRepo(
         private val UL_LIMIT = intPreferencesKey("ul_limit")
         private val CUSTOM_OPTIONS = stringPreferencesKey("custom_options")
         private val THEME_MODE = intPreferencesKey("theme_mode")
+        private val EXT_ENABLED = booleanPreferencesKey("ext_enabled")
+        private val EXT_PORT = intPreferencesKey("ext_port")
+        private val EXT_TOKEN = stringPreferencesKey("ext_token")
+        private val EXT_LISTEN_ALL = booleanPreferencesKey("ext_listen_all")
     }
 }

@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "aria2ng-next Connect",
+  "version": "1.0.0",
+  "description": "Send browser downloads to the aria2ng-next app on this device. Every request is confirmed in the app.",
+  "default_locale": "en",
+  "permissions": [
+    "downloads",
+    "contextMenus",
+    "cookies",
+    "storage",
+    "notifications"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "aria2ng-next",
+    "default_icon": {
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

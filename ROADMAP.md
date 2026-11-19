@@ -58,6 +58,20 @@ Design contract carried over from the legacy fixes:
 ### Later / optional
 - [ ] Desktop target via Compose Desktop reusing `shared`
 - [ ] Torrent search / peers view / bitfield visualizer (legacy features, only if wanted)
+- [ ] Ext-API: `verify`/probe fallback reasons, per-site rules, media sniffer (Rayburst parity)
+
+### M5 — Browser extension API (Rayburst-Connect-style)
+- [x] `ExtensionApiServer`: raw-socket HTTP API on its own port+token (no engine
+  restart), Bearer auth, CORS, 256 KiB body cap — `GET /downloads/capabilities`,
+  `POST /add`, `GET /tasks`, `POST /tasks/{gid}/pause|resume`
+- [x] Confirm-first contract: every `/add` lands in `extPending` → in-app dialog
+  + notification; `ack:"final"` holds the HTTP answer up to 120 s (timeout →
+  `fallback/unconfirmed` so the browser keeps its download)
+- [x] Request context → aria2 options: cookie/requestHeaders → `header`,
+  userAgent → `user-agent`, referer → `referer`, browser filename → `out`
+- [x] `extension/`: MV3 WebExtension (Kiwi/Lemur + desktop Chromium) —
+  download interception via `onDeterminingFilename`, context menu, options
+  (endpoint/token/test), task popup
 
 ## Status log
 
@@ -82,3 +96,12 @@ Design contract carried over from the legacy fixes:
 - 2026-11-20 — **M4 done.** Icon+splash, notification actions, speed limits,
   SAF dir picker. Release story decided: replace old repo; real `release.jks`
   (gitignored, `keystore.properties`) + `.github/workflows/android.yml`.
+- 2026-11-20 — **M5 done.** Rayburst-style Extension API + `extension/`
+  MV3 WebExtension (protocol documented in extension/README.md). Ext settings
+  live in their own flow — never triggers an engine restart. Ext-API ports
+  default 6902 release / 6903 debug.
+- 2026-11-20 — Ext-API now speaks **Rayburst Connect protocol 3** verbatim
+  (`/ping`, `/version`, `/stat`, `/tasks` string counters, `pause-all`,
+  `reveal`, 503 `engine_*` taxonomy, `verify`→`aria2.probe`): the
+  store-published Rayburst Connect extension connects unmodified. Sniffer
+  `media/v2/*` is deliberately unimplemented (404 → integration_unavailable).

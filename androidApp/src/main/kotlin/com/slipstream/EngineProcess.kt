@@ -66,6 +66,130 @@ class EngineProcess private constructor(
 
     fun evictHistory(gid: String) = historyStore.evict(gid)
 
+    // ---- Extension API (browser-extension download submissions) ----
+
+    private var extServer: ExtensionApiServer? = null
+    private var extSpec: ExtApiSpec? = null
+
+    private val _extPending = MutableStateFlow<List<PendingAdd>>(emptyList())
+    val extPending = _extPending.asStateFlow()
+
+    /**
+     * Ext-API settings live outside EngineSpec: restarting the lightweight
+     * HTTP listener must never bounce the engine.
+     */
+    @Synchronized
+    fun updateExtApi(spec: ExtApiSpec) {
+        if (spec == extSpec) return
+        extSpec = spec
+        extServer?.stop()
+        extServer =
+            if (spec.enabled && spec.token.isNotBlank()) {
+                ExtensionApiServer(spec, this, scope, ::appendLog).also { it.start() }
+            } else {
+                if (spec.enabled) appendLog("ext-api not started: empty token")
+                null
+            }
+    }
+
+    /** Releases the listener for good (service teardown) — unlike updateExtApi this isn't re-armable by the same spec. */
+    @Synchronized
+    fun releaseExtApi() {
+        extServer?.stop()
+        extServer = null
+        extSpec = null
+    }
+
+    fun enqueueExtAdd(p: PendingAdd) = _extPending.update { it + p }
+
+    fun dismissExtAdd(p: PendingAdd) {
+        // Atomic claim: the dialog and the notification action can race —
+        // whoever wins the CAS owns the verdict.
+        if (!p.claimed.compareAndSet(false, true)) return
+        _extPending.update { it - p }
+        p.verdict.complete(AddVerdict.Cancelled)
+    }
+
+    /** Confirmed by the user → real addUri. Returns the gid so UI can report failure. */
+    suspend fun confirmExtAdd(p: PendingAdd): Result<String> {
+        // Claim BEFORE the RPC round-trip — a second caller (double-tap or the
+        // notification button) must not issue a duplicate addUri.
+        if (!p.claimed.compareAndSet(false, true)) {
+            return Result.failure(IllegalStateException("already handled"))
+        }
+        _extPending.update { it - p }
+        val r = runCatching { manager.add(listOf(p.url), p.options) }
+        p.verdict.complete(
+            r.fold({ AddVerdict.Added(it) }, { AddVerdict.Failed(it.message ?: "add failed") }),
+        )
+        return r
+    }
+
+    /**
+     * Extension-API `tasks/{gid}/reveal`: open the download's file with a
+     * viewer app (there is no "show in folder" on Android). Runs from the
+     * service process — must launch with NEW_TASK.
+     */
+    fun revealExtTask(gid: String): Boolean {
+        val d =
+            (manager.downloads.value + history.value).firstOrNull { it.gid == gid } ?: return false
+        val f =
+            d.files
+                .firstOrNull()
+                ?.path
+                ?.let { File(it) } ?: File(d.dir, d.name)
+        if (!f.isFile) return false
+        val uri =
+            runCatching {
+                androidx.core.content.FileProvider
+                    .getUriForFile(context, "${context.packageName}.fileprovider", f)
+            }.getOrNull() ?: return false
+        val mime =
+            android.webkit.MimeTypeMap
+                .getSingleton()
+                .getMimeTypeFromExtension(f.extension.lowercase())
+                ?: "*/*"
+        // BAL: a backgrounded process can't startActivity — API 29+ silently
+        // aborts without throwing, so the old path reported success while
+        // nothing appeared. A notification's contentIntent click IS exempt;
+        // the file opens when the user taps it.
+        if (!androidx.core.app.NotificationManagerCompat
+                .from(context)
+                .areNotificationsEnabled()
+        ) {
+            return false
+        }
+        val view =
+            android.content
+                .Intent(android.content.Intent.ACTION_VIEW)
+                .setDataAndType(uri, mime)
+                .addFlags(
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_ACTIVITY_NEW_TASK,
+                )
+        val n =
+            androidx.core.app.NotificationCompat
+                .Builder(context, EngineService.EVENT_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle(f.name)
+                .setContentText(context.getString(R.string.ext_reveal_open))
+                .setContentIntent(
+                    android.app.PendingIntent.getActivity(
+                        context,
+                        20,
+                        view,
+                        android.app.PendingIntent.FLAG_IMMUTABLE or
+                            android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+                    ),
+                ).setAutoCancel(true)
+                .build()
+        return runCatching {
+            androidx.core.app.NotificationManagerCompat
+                .from(context)
+                .notify(EngineService.REVEAL_NOTIFICATION_ID, n)
+        }.isSuccess
+    }
+
     private val _state = MutableStateFlow<State>(State.Stopped)
     val state: StateFlow<State> = _state.asStateFlow()
 
@@ -267,6 +391,14 @@ class EngineProcess private constructor(
         scope.launch { runCatching { c.close() } }
         queueTeardown(p)
         _engineVersion.value = null
+        // Ext-API waiters can't be satisfied without an engine — fail them so
+        // an ack:"final" caller falls back to the browser's own download.
+        _extPending.value.forEach { p ->
+            if (p.claimed.compareAndSet(false, true)) {
+                p.verdict.complete(AddVerdict.Failed("engine stopped"))
+            }
+        }
+        _extPending.value = emptyList()
         _state.value = State.Stopped
     }
 

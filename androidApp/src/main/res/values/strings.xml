@@ -117,6 +117,30 @@
     <string name="perf_preset">Insert performance preset (-x16 -s64 -k1M)</string>
     <string name="save_restart">Save &amp; restart engine</string>
 
+    <!-- Browser extension API -->
+    <string name="ext_section">Browser extension</string>
+    <string name="ext_enabled">Extension API</string>
+    <string name="ext_enabled_sub">Companion extensions POST downloads to this port with the token below; every request asks for your confirmation</string>
+    <string name="ext_port">Extension API port</string>
+    <string name="ext_port_invalid">Must be 1024–65535 and differ from the RPC port</string>
+    <string name="ext_token">Extension API token</string>
+    <string name="ext_listen_all_sub">⚠ Anyone on your LAN with the token can submit download requests</string>
+    <string name="ext_req_title">Download request</string>
+    <string name="ext_req_name">File</string>
+    <string name="ext_req_referer">Referer</string>
+    <string name="ext_req_more">… %1$d more request(s) queued</string>
+    <string name="ext_req_notif">%1$d download request(s) waiting — first: %2$s</string>
+    <string name="ext_req_decline">Decline</string>
+    <string name="ext_req_accept">Download</string>
+    <string name="ext_notif_alerts">Notification alerts</string>
+    <string name="ext_notif_alerts_sub">Banner, sound and lockscreen options for download requests</string>
+    <string name="ext_bg_popup">Background pop-up</string>
+    <string name="ext_bg_popup_sub">MIUI/HyperOS: let the app come forward when a request arrives</string>
+    <string name="ext_battery">Keep alive in background</string>
+    <string name="ext_battery_sub">Allow ignoring battery optimizations, or the system cuts the API after a few minutes</string>
+    <string name="ext_reveal_open">Tap to open this file</string>
+    <string name="channel_ext_requests">Extension requests</string>
+
     <!-- About -->
     <string name="app_version">App version</string>
     <string name="build_time">Build time</string>

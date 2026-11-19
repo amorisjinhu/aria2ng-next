@@ -60,6 +60,7 @@ android {
             versionNameSuffix = "-debug"
             manifestPlaceholders["appName"] = "aria2ng-next D"
             buildConfigField("int", "DEFAULT_RPC_PORT", "6803")
+            buildConfigField("int", "DEFAULT_EXT_PORT", "6903")
         }
         release {
             isMinifyEnabled = true
@@ -71,6 +72,7 @@ android {
             applicationIdSuffix = ".release"
             manifestPlaceholders["appName"] = "aria2ng-next"
             buildConfigField("int", "DEFAULT_RPC_PORT", "6802")
+            buildConfigField("int", "DEFAULT_EXT_PORT", "6902")
             signingConfig = signingConfigs["release"]
         }
     }

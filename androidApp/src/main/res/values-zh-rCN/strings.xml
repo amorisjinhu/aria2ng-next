@@ -117,6 +117,30 @@
     <string name="perf_preset">插入性能预设（-x16 -s64 -k1M）</string>
     <string name="save_restart">保存并重启引擎</string>
 
+    <!-- Browser extension API -->
+    <string name="ext_section">浏览器扩展</string>
+    <string name="ext_enabled">扩展 API</string>
+    <string name="ext_enabled_sub">配套扩展用下方令牌向此端口提交下载；每个请求都需要你在应用内确认</string>
+    <string name="ext_port">扩展 API 端口</string>
+    <string name="ext_port_invalid">需为 1024–65535 且不能与 RPC 端口相同</string>
+    <string name="ext_token">扩展 API 令牌</string>
+    <string name="ext_listen_all_sub">⚠ 同一局域网内任何知道令牌的人都能提交下载请求</string>
+    <string name="ext_req_title">下载请求</string>
+    <string name="ext_req_name">文件</string>
+    <string name="ext_req_referer">来源页</string>
+    <string name="ext_req_more">… 队列中还有 %1$d 个请求</string>
+    <string name="ext_req_notif">%1$d 个下载请求待确认 — 首个：%2$s</string>
+    <string name="ext_req_decline">拒绝</string>
+    <string name="ext_req_accept">下载</string>
+    <string name="ext_notif_alerts">通知提醒设置</string>
+    <string name="ext_notif_alerts_sub">下载请求的横幅、声音与锁屏显示</string>
+    <string name="ext_bg_popup">后台弹出界面</string>
+    <string name="ext_bg_popup_sub">MIUI/HyperOS 需单独开启，请求到达时才能把 App 拉到前台</string>
+    <string name="ext_battery">后台保活</string>
+    <string name="ext_battery_sub">允许忽略电池优化，否则系统几分钟后会切断扩展 API 的网络</string>
+    <string name="ext_reveal_open">点击打开此文件</string>
+    <string name="channel_ext_requests">扩展请求</string>
+
     <!-- About -->
     <string name="app_version">应用版本</string>
     <string name="build_time">构建时间</string>

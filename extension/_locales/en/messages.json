@@ -1,0 +1,6 @@
+{
+  "menuTitle": { "message": "Download with aria2ng-next" },
+  "sentConfirm": { "message": "Sent — confirm in the app" },
+  "sendFailed": { "message": "Send failed" },
+  "fallbackNote": { "message": "App unreachable — browser kept the download" }
+}

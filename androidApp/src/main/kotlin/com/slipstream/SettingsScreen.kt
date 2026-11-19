@@ -52,9 +52,11 @@ fun SettingsScreen(
     onBack: () -> Unit,
 ) {
     val spec by repo.spec.collectAsState(initial = null)
+    val extSpec by repo.extSpec.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
 
     val s = spec ?: return // first DataStore emission hasn't arrived
+    val es = extSpec ?: return
 
     var port by remember(s) { mutableStateOf(s!!.rpcPort.toString()) }
     var token by remember(s) { mutableStateOf(s!!.rpcToken) }
@@ -67,6 +69,11 @@ fun SettingsScreen(
     var dlLimit by remember(s) { mutableStateOf(s!!.dlLimitKbps.takeIf { it > 0 }?.toString() ?: "") }
     var ulLimit by remember(s) { mutableStateOf(s!!.ulLimitKbps.takeIf { it > 0 }?.toString() ?: "") }
     val customOptions = remember(s) { OptionsEditorState(s!!.customOptions) }
+
+    var extEnabled by remember(es) { mutableStateOf(es!!.enabled) }
+    var extPort by remember(es) { mutableStateOf(es!!.port.toString()) }
+    var extToken by remember(es) { mutableStateOf(es!!.token) }
+    var extListenAll by remember(es) { mutableStateOf(es!!.listenAll) }
 
     Column(
         Modifier
@@ -156,6 +163,63 @@ fun SettingsScreen(
             stringResource(R.string.allow_origin_sub),
             allowOriginAll,
         ) { allowOriginAll = it }
+
+        Text(
+            stringResource(R.string.ext_section),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        SettingSwitch(stringResource(R.string.ext_enabled), stringResource(R.string.ext_enabled_sub), extEnabled) { extEnabled = it }
+        val extPortNum = extPort.toIntOrNull()
+        val extPortValid = extPortNum != null && extPortNum in 1024..65535 && extPortNum != portNum
+        if (extEnabled) {
+            OutlinedTextField(
+                value = extPort,
+                onValueChange = { extPort = it.filter(Char::isDigit).take(5) },
+                label = { Text(stringResource(R.string.ext_port)) },
+                isError = !extPortValid,
+                supportingText = {
+                    if (!extPortValid) Text(stringResource(R.string.ext_port_invalid))
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = extToken,
+                    onValueChange = { extToken = it },
+                    label = { Text(stringResource(R.string.ext_token)) },
+                    modifier = Modifier.weight(1f),
+                )
+                val cdExtToken = stringResource(R.string.cd_random_token)
+                IconButton(onClick = { extToken = SettingsRepo.randomToken() }) {
+                    Text(
+                        "🎲",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.semantics { contentDescription = cdExtToken },
+                    )
+                }
+            }
+            SettingSwitch(stringResource(R.string.listen_all), stringResource(R.string.ext_listen_all_sub), extListenAll) {
+                extListenAll =
+                    it
+            }
+            // Request alerts live on the OS side — channel toggles plus the
+            // OEM-specific "pop up while in background" grant that gates FSI.
+            val ctxExt = androidx.compose.ui.platform.LocalContext.current
+            SettingLink(
+                stringResource(R.string.ext_notif_alerts),
+                stringResource(R.string.ext_notif_alerts_sub),
+            ) { openChannelSettings(ctxExt) }
+            SettingLink(
+                stringResource(R.string.ext_bg_popup),
+                stringResource(R.string.ext_bg_popup_sub),
+            ) { openBgPopupSettings(ctxExt) }
+            SettingLink(
+                stringResource(R.string.ext_battery),
+                stringResource(R.string.ext_battery_sub),
+            ) { requestBatteryWhitelist(ctxExt) }
+        }
 
         Text(
             stringResource(R.string.engine_section),
@@ -253,6 +317,14 @@ fun SettingsScreen(
         Button(
             onClick = {
                 scope.launch {
+                    repo.saveExt(
+                        ExtApiSpec(
+                            enabled = extEnabled,
+                            port = extPort.toIntOrNull() ?: es!!.port,
+                            token = extToken.ifBlank { es!!.token },
+                            listenAll = extListenAll,
+                        ),
+                    )
                     repo.save(
                         EngineSpec(
                             rpcPort = portNum ?: s!!.rpcPort,
@@ -271,7 +343,9 @@ fun SettingsScreen(
                     onBack()
                 }
             },
-            enabled = portValid,
+            // A saved-but-invalid ext port would bind-fail silently — block it
+            // the same way the RPC port does.
+            enabled = portValid && (!extEnabled || extPortValid),
             modifier = Modifier.fillMaxWidth(),
         ) { Text(stringResource(R.string.save_restart)) }
     }
@@ -310,6 +384,79 @@ private fun SettingSwitch(
             Switch(checked = checked, onCheckedChange = onChange)
         }
     }
+}
+
+@Composable
+private fun SettingLink(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, onClick = onClick) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/** Deep-link into the ext-request channel's alert toggles (banner/sound/lockscreen). */
+private fun openChannelSettings(ctx: android.content.Context) {
+    ctx.startActivity(
+        android.content
+            .Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+            .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, EngineService.EXT_CHANNEL_ID),
+    )
+}
+
+/**
+ * MIUI/HyperOS gates full-screen intents behind a per-app "pop up while in
+ * background" switch that only exists in its own permission editor. Fall back
+ * to the generic app-details page on other OEMs.
+ */
+private fun openBgPopupSettings(ctx: android.content.Context) {
+    val miui =
+        android.content
+            .Intent("miui.intent.action.APP_PERM_EDITOR")
+            .setClassName(
+                "com.miui.securitycenter",
+                "com.miui.permcenter.permissions.PermissionsEditorActivity",
+            ).putExtra("extra_pkgname", ctx.packageName)
+    val intent =
+        if (miui.resolveActivity(ctx.packageManager) != null) {
+            miui
+        } else {
+            android.content.Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.parse("package:${ctx.packageName}"),
+            )
+        }
+    ctx.startActivity(intent)
+}
+
+/**
+ * Deep-link to the doze/battery-optimization whitelist dialog — the single
+ * switch that keeps the Extension API reachable while the app is backgrounded.
+ * Already whitelisted → fall back to the app details page.
+ */
+private fun requestBatteryWhitelist(ctx: android.content.Context) {
+    val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+    val intent =
+        if (pm.isIgnoringBatteryOptimizations(ctx.packageName)) {
+            android.content.Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.parse("package:${ctx.packageName}"),
+            )
+        } else {
+            android.content.Intent(
+                android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                android.net.Uri.parse("package:${ctx.packageName}"),
+            )
+        }
+    ctx.startActivity(intent)
 }
 
 /** Jump to this app's "All files access" grant page (API 30+). */

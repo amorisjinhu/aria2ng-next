@@ -50,11 +50,35 @@ class EngineService : Service() {
         createChannel()
 
         scope.launch {
-            repo.ensureDefaults() // seed a random RPC token on first run
+            repo.ensureDefaults() // seed random RPC + ext tokens on first run
             @OptIn(kotlinx.coroutines.FlowPreview::class)
             repo.spec
                 .debounce(800) // absorb burst writes → single restart
                 .collect { spec -> engine.updateSpec(spec) }
+        }
+
+        // Ext-API spec is separate: swapping the little HTTP listener must not
+        // restart aria2. Same debounce — settings writes land in bursts too.
+        scope.launch {
+            // Idempotent seeding FIRST — collecting extSpec before ensureDefaults
+            // writes can hand a blank token to the server (fail-open auth hole).
+            repo.ensureDefaults()
+            @OptIn(kotlinx.coroutines.FlowPreview::class)
+            repo.extSpec
+                .debounce(800)
+                .collect { spec -> engine.updateExtApi(spec) }
+        }
+
+        // Pending ext submissions → one notification that tracks the queue:
+        // posted on first request, refreshed per change, gone when drained.
+        scope.launch {
+            engine.extPending.collect { list ->
+                if (list.isEmpty()) {
+                    NotificationManagerCompat.from(this@EngineService).cancel(EXT_NOTIFICATION_ID)
+                } else {
+                    runCatching { postExtRequestNotification(list) }
+                }
+            }
         }
 
         // aria2.on* push events → user notification. Two-stage: the collector
@@ -88,6 +112,16 @@ class EngineService : Service() {
             }
             ACTION_PAUSE_ALL -> scope.launch { runCatching { engine.manager.pauseAll() } }
             ACTION_RESUME_ALL -> scope.launch { runCatching { engine.manager.unpauseAll() } }
+            // Notification action buttons — act on the queue head; the
+            // extPending collector reposts or cancels as the queue moves.
+            ACTION_EXT_CONFIRM ->
+                engine.extPending.value.firstOrNull()?.let { p ->
+                    scope.launch { runCatching { engine.confirmExtAdd(p) } }
+                }
+            ACTION_EXT_DECLINE ->
+                engine.extPending.value
+                    .firstOrNull()
+                    ?.let { engine.dismissExtAdd(it) }
             else -> {
                 startForeground(NOTIFICATION_ID, buildNotification())
                 wantRunning = true
@@ -124,6 +158,7 @@ class EngineService : Service() {
 
     override fun onDestroy() {
         engine.stop() // issues SIGTERM synchronously even though scope is dying
+        engine.releaseExtApi() // close the HTTP listener explicitly, don't rely on process death
         scope.cancel()
         super.onDestroy()
     }
@@ -229,6 +264,43 @@ class EngineService : Service() {
         NotificationManagerCompat.from(this).notify(EVENT_NOTIFICATION_ID, n)
     }
 
+    private fun postExtRequestNotification(list: List<PendingAdd>) {
+        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) return
+        val n =
+            NotificationCompat
+                .Builder(this, EXT_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle(getString(R.string.ext_req_title))
+                .setContentText(getString(R.string.ext_req_notif, list.size, list.first().displayName))
+                .setContentIntent(openAppIntent())
+                // A held browser download decays fast — surface like a call:
+                // heads-up banner plus full-screen intent where the OEM
+                // (and API 34+) permits it. Both are best-effort.
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setFullScreenIntent(openAppIntent(), true)
+                .addAction(
+                    0,
+                    getString(R.string.ext_req_accept),
+                    PendingIntent.getService(
+                        this,
+                        10,
+                        Intent(this, EngineService::class.java).setAction(ACTION_EXT_CONFIRM),
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                    ),
+                ).addAction(
+                    0,
+                    getString(R.string.ext_req_decline),
+                    PendingIntent.getService(
+                        this,
+                        11,
+                        Intent(this, EngineService::class.java).setAction(ACTION_EXT_DECLINE),
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                    ),
+                ).setAutoCancel(true)
+                .build()
+        NotificationManagerCompat.from(this).notify(EXT_NOTIFICATION_ID, n)
+    }
+
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(NotificationManager::class.java)
@@ -246,19 +318,33 @@ class EngineService : Service() {
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ),
             )
+            // Separate channel: IMPORTANCE_HIGH is locked at creation and must
+            // never share a channel with routine engine events.
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    EXT_CHANNEL_ID,
+                    getString(R.string.channel_ext_requests),
+                    NotificationManager.IMPORTANCE_HIGH,
+                ),
+            )
         }
     }
 
     companion object {
         private const val CHANNEL_ID = "engine"
-        private const val EVENT_CHANNEL_ID = "downloads"
+        const val EVENT_CHANNEL_ID = "downloads"
+        const val EXT_CHANNEL_ID = "ext_requests"
         private const val NOTIFICATION_ID = 1
         private const val EVENT_NOTIFICATION_ID = 2
+        private const val EXT_NOTIFICATION_ID = 3
+        const val REVEAL_NOTIFICATION_ID = 4
         private const val EVENT_WINDOW_MS = 2_500L
         const val ACTION_START = "com.slipstream.action.START"
         const val ACTION_STOP = "com.slipstream.action.STOP"
         const val ACTION_PAUSE_ALL = "com.slipstream.action.PAUSE_ALL"
         const val ACTION_RESUME_ALL = "com.slipstream.action.RESUME_ALL"
+        const val ACTION_EXT_CONFIRM = "com.slipstream.action.EXT_CONFIRM"
+        const val ACTION_EXT_DECLINE = "com.slipstream.action.EXT_DECLINE"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(

@@ -119,16 +119,18 @@ class DownloadManager(
     suspend fun add(
         uris: List<String>,
         options: Map<String, String>? = null,
-    ) {
-        client.addUri(
-            uris,
-            options?.let {
-                kotlinx.serialization.json.buildJsonObject {
-                    it.forEach { (k, v) -> put(k, kotlinx.serialization.json.JsonPrimitive(v)) }
-                }
-            },
-        )
+    ): String {
+        val gid =
+            client.addUri(
+                uris,
+                options?.let {
+                    kotlinx.serialization.json.buildJsonObject {
+                        it.forEach { (k, v) -> put(k, kotlinx.serialization.json.JsonPrimitive(v)) }
+                    }
+                },
+            )
         refresh()
+        return gid
     }
 
     suspend fun getOption(gid: String): Map<String, String> = client.getOption(gid)
