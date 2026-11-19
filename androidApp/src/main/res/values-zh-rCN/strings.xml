@@ -43,6 +43,9 @@
     <string name="open_failed">无法打开：此位置不支持分享</string>
     <string name="sha_failed">校验失败：文件不可读</string>
     <string name="del_partial">%1$d 项仍存活——已跳过文件删除</string>
+    <string name="retry">重试</string>
+    <string name="cd_retry">重试</string>
+    <string name="retry_no_source">无法重试：未保存下载地址</string>
     <string name="computing">计算中 %1$d%%…</string>
     <string name="copy">复制</string>
 

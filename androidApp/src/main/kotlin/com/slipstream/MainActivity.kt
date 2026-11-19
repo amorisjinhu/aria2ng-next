@@ -19,6 +19,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -45,6 +47,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -278,7 +281,11 @@ fun DownloadScreen(
     onOpenDrawer: () -> Unit,
 ) {
     val state by engine.state.collectAsState()
-    val downloads by engine.manager.downloads.collectAsState()
+    val live by engine.manager.downloads.collectAsState()
+    val hist by engine.history.collectAsState()
+    // Live engine state first, then persisted finished records — aria2 itself
+    // forgets stopped results on restart, the store keeps them visible.
+    val downloads = live + hist.filter { h -> live.none { it.gid == h.gid } }
     val globalStat by engine.manager.globalStat.collectAsState()
     var addDialogText by remember { mutableStateOf<String?>(null) }
     var detail by remember { mutableStateOf<Download?>(null) }
@@ -314,6 +321,33 @@ fun DownloadScreen(
         selected = if (gid in selected) selected - gid else selected + gid
     }
 
+    /** aria2 has no retry RPC: clear the dead entry, re-add with its URIs. */
+    fun retryDownload(d: Download) {
+        rpcOp {
+            val uris = d.files.flatMap { it.uris }.distinct()
+            if (uris.isEmpty()) {
+                snackbarHostState.showSnackbar(context.getString(R.string.retry_no_source))
+                return@rpcOp
+            }
+            val opts =
+                if (d.persisted) {
+                    null
+                } else {
+                    runCatching { engine.manager.getOption(d.gid) }.getOrNull()
+                }
+            if (!d.persisted) {
+                // error/complete → clear the result; live statuses → remove the task
+                if (d.status in setOf(Download.Status.ACTIVE, Download.Status.WAITING, Download.Status.PAUSED)) {
+                    runCatching { engine.manager.remove(d.gid) }
+                } else {
+                    runCatching { engine.manager.clearResult(d.gid) }
+                }
+            }
+            engine.evictHistory(d.gid)
+            engine.manager.add(uris, opts)
+        }
+    }
+
     /**
      * Batch delete: remove live tasks, clear the stopped record, and — when
      * [withFiles] — also wipe the payloads + .aria2 control files from disk.
@@ -333,6 +367,7 @@ fun DownloadScreen(
                             .onFailure { failed++ }
                             .isSuccess
                 runCatching { engine.manager.clearResult(d.gid) }
+                engine.evictHistory(d.gid) // persisted records don't exist aria2-side
                 if (withFiles && stopped) deleteDownloadFiles(d)
             }
             if (failed > 0) {
@@ -465,8 +500,7 @@ fun DownloadScreen(
                             onLongClick = { if (selected.isEmpty()) toggleSel(d.gid) },
                             onPause = { rpcOp { engine.manager.pause(d.gid) } },
                             onResume = { rpcOp { engine.manager.resume(d.gid) } },
-                            onRemove = { rpcOp { engine.manager.remove(d.gid) } },
-                            onClear = { rpcOp { engine.manager.clearResult(d.gid) } },
+                            onRetry = { retryDownload(d) },
                         )
                     }
                 }
@@ -496,6 +530,7 @@ fun DownloadScreen(
             onEditOptions = {
                 rpcOp { optionsEdit = d.gid to engine.manager.getOption(d.gid) }
             },
+            onRetry = { retryDownload(d) },
         )
     }
 
@@ -545,8 +580,7 @@ private fun DownloadCard(
     onLongClick: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
-    onRemove: () -> Unit,
-    onClear: () -> Unit,
+    onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -575,6 +609,32 @@ private fun DownloadCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                // Exactly one contextual action: pause / resume / retry.
+                // Deletion lives in long-press selection mode instead.
+                when (download.status) {
+                    Download.Status.ACTIVE, Download.Status.WAITING ->
+                        IconButton(onClick = onPause) {
+                            // icons-core has no Pause glyph; draw the two bars
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                repeat(2) {
+                                    Box(
+                                        Modifier
+                                            .size(width = 4.dp, height = 16.dp)
+                                            .background(MaterialTheme.colorScheme.onSurfaceVariant),
+                                    )
+                                }
+                            }
+                        }
+                    Download.Status.PAUSED ->
+                        IconButton(onClick = onResume) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.cd_resume))
+                        }
+                    Download.Status.ERROR ->
+                        IconButton(onClick = onRetry) {
+                            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.cd_retry))
+                        }
+                    else -> {}
+                }
             }
 
             LinearProgressIndicator(
@@ -611,32 +671,6 @@ private fun DownloadCard(
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
                 )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                when (download.status) {
-                    Download.Status.ACTIVE ->
-                        IconButton(onClick = onPause) {
-                            Text("⏸")
-                        }
-                    Download.Status.PAUSED ->
-                        IconButton(onClick = onResume) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.cd_resume))
-                        }
-                    else -> {}
-                }
-                if (download.status == Download.Status.ACTIVE ||
-                    download.status == Download.Status.PAUSED ||
-                    download.status == Download.Status.WAITING
-                ) {
-                    IconButton(onClick = onRemove) {
-                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cd_remove))
-                    }
-                } else {
-                    IconButton(onClick = onClear) {
-                        Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.cd_clear))
-                    }
-                }
             }
         }
     }
@@ -787,6 +821,7 @@ private fun DownloadDetailDialog(
     download: Download,
     onDismiss: () -> Unit,
     onEditOptions: () -> Unit,
+    onRetry: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -886,9 +921,24 @@ private fun DownloadDetailDialog(
                         },
                     ) { Text("SHA-256") }
                 }
-                if (download.status == Download.Status.ACTIVE ||
-                    download.status == Download.Status.PAUSED ||
-                    download.status == Download.Status.WAITING
+                // Retry needs source URIs; persisted entries have no live gid
+                // so option editing is meaningless on them.
+                if ((download.status == Download.Status.ERROR || download.persisted) &&
+                    download.files.any { it.uris.isNotEmpty() }
+                ) {
+                    TextButton(onClick = {
+                        onRetry()
+                        onDismiss()
+                    }) {
+                        Text(stringResource(R.string.retry))
+                    }
+                }
+                if (!download.persisted &&
+                    (
+                        download.status == Download.Status.ACTIVE ||
+                            download.status == Download.Status.PAUSED ||
+                            download.status == Download.Status.WAITING
+                    )
                 ) {
                     TextButton(onClick = onEditOptions) { Text(stringResource(R.string.edit_options)) }
                 }

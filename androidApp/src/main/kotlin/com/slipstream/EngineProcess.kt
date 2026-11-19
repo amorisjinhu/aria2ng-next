@@ -56,6 +56,16 @@ class EngineProcess private constructor(
     // don't orphan the UI's collected StateFlow.
     val manager: DownloadManager = DownloadManager({ client }, scope, ::appendLog)
 
+    // Finished-record persistence — aria2 drops stopped results on exit.
+    val historyStore: HistoryStore = HistoryStore(context.filesDir, scope)
+    val history: StateFlow<List<com.slipstream.model.Download>> get() = historyStore.history
+
+    init {
+        scope.launch { manager.downloads.collect { snapshot -> historyStore.merge(snapshot) } }
+    }
+
+    fun evictHistory(gid: String) = historyStore.evict(gid)
+
     private val _state = MutableStateFlow<State>(State.Stopped)
     val state: StateFlow<State> = _state.asStateFlow()
 

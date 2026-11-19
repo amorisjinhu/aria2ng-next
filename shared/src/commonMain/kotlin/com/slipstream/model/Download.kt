@@ -1,21 +1,25 @@
 package com.slipstream.model
 
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+@Serializable
 data class FileEntry(
     val index: Int,
     val path: String,
     val length: Long,
     val completedLength: Long,
     val selected: Boolean,
+    val uris: List<String> = emptyList(),
 ) {
     val progress: Float
         get() = if (length > 0) (completedLength.toFloat() / length).coerceIn(0f, 1f) else 0f
 }
 
+@Serializable
 data class Download(
     val gid: String,
     val status: Status,
@@ -29,6 +33,9 @@ data class Download(
     val errorCode: String?,
     val errorMessage: String?,
     val files: List<FileEntry> = emptyList(),
+    // True when this entry comes from the on-disk history store, not a live
+    // aria2 — the gid no longer exists engine-side, so only file/record ops work.
+    val persisted: Boolean = false,
 ) {
     val progress: Float
         get() = if (totalLength > 0) (completedLength.toFloat() / totalLength).coerceIn(0f, 1f) else 0f
@@ -42,6 +49,7 @@ data class Download(
                 -1L
             }
 
+    @Serializable
     enum class Status {
         ACTIVE,
         WAITING,
@@ -124,6 +132,10 @@ data class Download(
                                 length = entry["length"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0,
                                 completedLength = entry["completedLength"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0,
                                 selected = entry["selected"]?.jsonPrimitive?.content == "true",
+                                uris =
+                                    (entry["uris"] as? JsonArray)?.mapNotNull {
+                                        (it as? JsonObject)?.get("uri")?.jsonPrimitive?.content
+                                    } ?: emptyList(),
                             )
                         }
                     } ?: emptyList(),

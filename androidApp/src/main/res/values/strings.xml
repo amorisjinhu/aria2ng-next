@@ -43,6 +43,9 @@
     <string name="open_failed">Can\'t open: this location isn\'t shareable</string>
     <string name="sha_failed">Verification failed: file unreadable</string>
     <string name="del_partial">%1$d item(s) still active — files kept</string>
+    <string name="retry">Retry</string>
+    <string name="cd_retry">Retry</string>
+    <string name="retry_no_source">Can\'t retry: no source URI stored</string>
     <string name="computing">computing %1$d%%…</string>
     <string name="copy">Copy</string>
 
