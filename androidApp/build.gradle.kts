@@ -39,8 +39,8 @@ android {
         applicationId = "com.aria2ngnext"
         minSdk = 24
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.1.3"
         // UTC build stamp for the About page — distinguishes same-version builds.
         // Config-time value: a config-cache hit reuses it, which is fine —
         // unchanged config means the same binary anyway.
