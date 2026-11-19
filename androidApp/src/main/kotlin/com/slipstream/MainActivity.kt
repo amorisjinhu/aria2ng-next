@@ -42,17 +42,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -82,6 +86,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -446,7 +451,7 @@ fun DownloadScreen(
                                 )
                             }
                             Spacer(Modifier.weight(1f))
-                            TextButton(onClick = {
+                            IconButton(onClick = {
                                 // Route through the service: it owns wantRunning
                                 // + the foreground state — a bare engine.stop()
                                 // leaves the FGS spinning and lets a STICKY
@@ -457,13 +462,24 @@ fun DownloadScreen(
                                     EngineService.start(context)
                                 }
                             }) {
-                                Text(
-                                    when (state) {
-                                        is EngineProcess.State.Running -> "●"
-                                        is EngineProcess.State.Starting -> "…"
-                                        else -> "○"
-                                    },
-                                )
+                                when (state) {
+                                    is EngineProcess.State.Running ->
+                                        Icon(
+                                            Icons.Filled.Circle,
+                                            contentDescription = null,
+                                            tint = Color(0xFF4CAF50),
+                                            modifier = Modifier.size(12.dp),
+                                        )
+                                    is EngineProcess.State.Starting ->
+                                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    else ->
+                                        Icon(
+                                            Icons.Outlined.Circle,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(12.dp),
+                                        )
+                                }
                             }
                         }
                         SpeedGraph(speedHistory, Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 16.dp))
@@ -594,83 +610,80 @@ private fun DownloadCard(
                 CardDefaults.cardColors()
             },
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (selected) {
-                    Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(6.dp))
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (selected) {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    StatusChip(download.status)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        download.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-                StatusChip(download.status)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    download.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+
+                LinearProgressIndicator(
+                    progress = { download.progress },
+                    modifier = Modifier.fillMaxWidth().height(6.dp),
                 )
-                // Exactly one contextual action: pause / resume / retry.
-                // Deletion lives in long-press selection mode instead.
-                when (download.status) {
-                    Download.Status.ACTIVE, Download.Status.WAITING ->
-                        IconButton(onClick = onPause) {
-                            // icons-core has no Pause glyph; draw the two bars
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                repeat(2) {
-                                    Box(
-                                        Modifier
-                                            .size(width = 4.dp, height = 16.dp)
-                                            .background(MaterialTheme.colorScheme.onSurfaceVariant),
-                                    )
-                                }
-                            }
-                        }
-                    Download.Status.PAUSED ->
-                        IconButton(onClick = onResume) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.cd_resume))
-                        }
-                    Download.Status.ERROR ->
-                        IconButton(onClick = onRetry) {
-                            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.cd_retry))
-                        }
-                    else -> {}
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        "${formatBytes(download.completedLength)} / ${formatBytes(download.totalLength)}" +
+                            "  (${(download.progress * 100).toInt()}%)",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        when (download.status) {
+                            Download.Status.ACTIVE ->
+                                stringResource(
+                                    R.string.card_speed_eta,
+                                    formatSpeed(download.downloadSpeed),
+                                    formatEta(download.etaSeconds),
+                                    download.connections,
+                                )
+                            Download.Status.ERROR -> download.errorMessage ?: stringResource(R.string.error_unknown)
+                            else -> statusLabel(download.status)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color =
+                            when (download.status) {
+                                Download.Status.ACTIVE -> MaterialTheme.colorScheme.primary
+                                Download.Status.ERROR -> MaterialTheme.colorScheme.error
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
                 }
             }
 
-            LinearProgressIndicator(
-                progress = { download.progress },
-                modifier = Modifier.fillMaxWidth().height(6.dp),
-            )
-
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    "${formatBytes(download.completedLength)} / ${formatBytes(download.totalLength)}" +
-                        "  (${(download.progress * 100).toInt()}%)",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
-                    when (download.status) {
-                        Download.Status.ACTIVE ->
-                            stringResource(
-                                R.string.card_speed_eta,
-                                formatSpeed(download.downloadSpeed),
-                                formatEta(download.etaSeconds),
-                                download.connections,
-                            )
-                        Download.Status.ERROR -> download.errorMessage ?: stringResource(R.string.error_unknown)
-                        else -> statusLabel(download.status)
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color =
-                        when (download.status) {
-                            Download.Status.ACTIVE -> MaterialTheme.colorScheme.primary
-                            Download.Status.ERROR -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                )
+            // Exactly one contextual action, centred on the card's right
+            // edge. Deletion lives in long-press selection mode instead.
+            when (download.status) {
+                Download.Status.ACTIVE, Download.Status.WAITING ->
+                    IconButton(onClick = onPause) {
+                        Icon(Icons.Filled.Pause, contentDescription = stringResource(R.string.cd_pause))
+                    }
+                Download.Status.PAUSED ->
+                    IconButton(onClick = onResume) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.cd_resume))
+                    }
+                Download.Status.ERROR ->
+                    IconButton(onClick = onRetry) {
+                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.cd_retry))
+                    }
+                else -> {}
             }
         }
     }
