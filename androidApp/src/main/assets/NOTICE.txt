@@ -1,0 +1,15 @@
+Slipstream
+==========
+
+This application bundles the following third-party component:
+
+aria2-next 3.1.1 — multi-protocol download engine
+License: GNU General Public License v2.0 or later (with OpenSSL linking exception)
+Source: https://github.com/maboroshin/aria2-next
+
+The engine is distributed as a standalone program executed by this
+application and controlled via its JSON-RPC interface; it is a separate
+work from the application code as described by GPL "mere aggregation".
+
+All other components (application code, Kotlin/Ktor/Compose libraries)
+are distributed under their respective permissive licenses.

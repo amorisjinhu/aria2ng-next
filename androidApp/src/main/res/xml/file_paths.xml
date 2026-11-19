@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- App-private + shared storage; downloads can live in either -->
+    <files-path name="files" path="." />
+    <external-files-path name="external_files" path="." />
+    <external-path name="storage" path="." />
+</paths>

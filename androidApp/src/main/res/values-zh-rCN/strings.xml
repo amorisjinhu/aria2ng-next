@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">aria2ng-next</string>
+
+    <!-- Navigation / chrome -->
+    <string name="cd_menu">打开菜单</string>
+    <string name="cd_add">新建下载</string>
+    <string name="cd_engine_toggle">启动或停止引擎</string>
+    <string name="empty_list_hint">还没有下载，点 + 添加</string>
+    <string name="settings">设置</string>
+    <string name="engine_log">引擎日志</string>
+    <string name="about">关于</string>
+    <string name="speed_line">↓ %1$s  ↑ %2$s</string>
+
+    <!-- Download list -->
+    <string name="status_active">下载中</string>
+    <string name="status_paused">已暂停</string>
+    <string name="status_waiting">排队中</string>
+    <string name="status_error">出错</string>
+    <string name="status_complete">已完成</string>
+    <string name="status_removed">已移除</string>
+    <string name="card_speed_eta">↓ %1$s  ETA %2$s  ×%3$d</string>
+    <string name="error_unknown">出错</string>
+    <string name="cd_pause">暂停</string>
+    <string name="cd_resume">继续</string>
+    <string name="cd_remove">移除</string>
+    <string name="cd_clear">清除记录</string>
+    <string name="rpc_failed">RPC 错误：%1$s</string>
+
+    <!-- Selection / batch delete -->
+    <string name="sel_count">已选 %1$d 项</string>
+    <string name="sel_all">全选</string>
+    <string name="sel_exit">退出选择</string>
+    <string name="del_title">删除 %1$d 项任务</string>
+    <string name="del_text">是否同时删除存储中的文件？</string>
+    <string name="del_records_only">仅删除记录</string>
+    <string name="del_with_files">连同文件删除</string>
+
+    <!-- File open / checksum -->
+    <string name="open_file">打开</string>
+    <string name="no_app">没有可打开此文件的应用</string>
+    <string name="file_missing">存储中找不到该文件</string>
+    <string name="computing">计算中 %1$d%%…</string>
+    <string name="copy">复制</string>
+
+    <!-- Add dialog -->
+    <string name="add_download">新建下载</string>
+    <string name="urls_hint">每行一个链接（http/magnet）</string>
+    <string name="paste">粘贴</string>
+    <string name="pick_torrent">选择 .torrent</string>
+    <string name="options">选项…</string>
+    <string name="options_count">选项（%1$d）</string>
+    <string name="download">下载</string>
+    <string name="cancel">取消</string>
+    <string name="apply">应用</string>
+    <string name="ok">确定</string>
+
+    <!-- Detail dialog -->
+    <string name="detail_status">状态</string>
+    <string name="detail_gid">GID</string>
+    <string name="detail_progress">进度</string>
+    <string name="detail_speed">速度</string>
+    <string name="detail_dir">保存位置</string>
+    <string name="detail_error">错误</string>
+    <string name="detail_files">文件（%1$d）</string>
+    <string name="edit_options">编辑选项</string>
+    <string name="close">关闭</string>
+    <string name="files_more">… 还有 %1$d 个</string>
+    <string name="options_dialog_prefix">选项：%1$s</string>
+    <string name="options_new">新任务选项</string>
+    <string name="options_live_hint">进行中的任务可实时修改</string>
+
+    <!-- Options editor -->
+    <string name="add_option">+ 添加选项</string>
+    <string name="add_option_title">添加选项</string>
+    <string name="search">搜索</string>
+    <string name="use_custom_key">使用自定义 key</string>
+    <string name="cd_remove_option">删除选项</string>
+
+    <!-- Settings -->
+    <string name="appearance">外观</string>
+    <string name="theme_system">跟随系统</string>
+    <string name="theme_light">浅色</string>
+    <string name="theme_dark">深色</string>
+    <string name="rpc_section">RPC</string>
+    <string name="rpc_port">RPC 监听端口</string>
+    <string name="port_invalid">端口需在 1024–65535 之间</string>
+    <string name="rpc_token">RPC 密钥</string>
+    <string name="cd_random_token">随机生成密钥</string>
+    <string name="rpc_transport">RPC 传输方式</string>
+    <string name="rpc_transport_sub">服务端在同一端口同时提供两种协议，此处选择应用的连接方式。WebSocket 有实时事件推送（状态、通知）；HTTP 每秒轮询，无推送。</string>
+    <string name="listen_all">监听所有网卡</string>
+    <string name="listen_all_sub">⚠ 同一局域网内任何知道密钥的人都能控制引擎</string>
+    <string name="allow_origin">允许所有来源</string>
+    <string name="allow_origin_sub">接受任意来源的 WebSocket 连接</string>
+    <string name="engine_section">引擎</string>
+    <string name="download_dir">下载目录</string>
+    <string name="use_public_download">使用公共下载目录</string>
+    <string name="storage_warning">⚠ 需要"所有文件访问"权限</string>
+    <string name="check_cert">校验 TLS 证书</string>
+    <string name="check_cert_sub">需要 CA 证书包（ca-certificate 选项）— Android 无系统证书库</string>
+    <string name="save_session">保存会话</string>
+    <string name="save_session_sub">重启后恢复下载</string>
+    <string name="speed_limits">限速</string>
+    <string name="dl_limit">下载 (KB/s)</string>
+    <string name="ul_limit">上传 (KB/s)</string>
+    <string name="limits_sub">留空或 0 = 不限速，作用于整个引擎</string>
+    <string name="browse_dir">浏览…</string>
+    <string name="custom_options">自定义选项</string>
+    <string name="forced_params_hint">连接类参数（rpc-*、目录、会话）由引擎强制接管，这里设置无效</string>
+    <string name="perf_preset">插入性能预设（-x16 -s64 -k1M）</string>
+    <string name="save_restart">保存并重启引擎</string>
+
+    <!-- About -->
+    <string name="app_version">应用版本</string>
+    <string name="engine_version_label">引擎</string>
+    <string name="aria2_next_version">aria2-next %1$s</string>
+    <string name="engine_stopped">已停止</string>
+    <string name="license_label">许可</string>
+    <string name="license_engine">GPLv2+（引擎）— 见 assets/NOTICE.txt</string>
+
+    <!-- Engine event notifications -->
+    <string name="channel_events">下载事件</string>
+    <string name="ev_started">已开始</string>
+    <string name="ev_completed">已完成</string>
+    <string name="ev_error">出错</string>
+    <string name="ev_paused">已暂停</string>
+    <string name="ev_stopped">已停止</string>
+    <string name="ev_updated">已更新</string>
+    <string name="ev_single">%1$s %2$s</string>
+    <string name="notif_pause_all">全部暂停</string>
+    <string name="notif_resume_all">全部继续</string>
+    <string name="notif_stop">停止</string>
+</resources>

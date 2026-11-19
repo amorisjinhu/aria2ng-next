@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">aria2ng-next</string>
+
+    <!-- Navigation / chrome -->
+    <string name="cd_menu">Open menu</string>
+    <string name="cd_add">Add download</string>
+    <string name="cd_engine_toggle">Start or stop engine</string>
+    <string name="empty_list_hint">No downloads. Tap + to add one.</string>
+    <string name="settings">Settings</string>
+    <string name="engine_log">Engine log</string>
+    <string name="about">About</string>
+    <string name="speed_line">↓ %1$s  ↑ %2$s</string>
+
+    <!-- Download list -->
+    <string name="status_active">active</string>
+    <string name="status_paused">paused</string>
+    <string name="status_waiting">waiting</string>
+    <string name="status_error">error</string>
+    <string name="status_complete">complete</string>
+    <string name="status_removed">removed</string>
+    <string name="card_speed_eta">↓ %1$s  ETA %2$s  ×%3$d</string>
+    <string name="error_unknown">error</string>
+    <string name="cd_pause">Pause</string>
+    <string name="cd_resume">Resume</string>
+    <string name="cd_remove">Remove</string>
+    <string name="cd_clear">Clear result</string>
+    <string name="rpc_failed">RPC error: %1$s</string>
+
+    <!-- Selection / batch delete -->
+    <string name="sel_count">%1$d selected</string>
+    <string name="sel_all">Select all</string>
+    <string name="sel_exit">Exit selection</string>
+    <string name="del_title">Delete %1$d task(s)</string>
+    <string name="del_text">Also delete the downloaded files from storage?</string>
+    <string name="del_records_only">Records only</string>
+    <string name="del_with_files">Delete files too</string>
+
+    <!-- File open / checksum -->
+    <string name="open_file">Open</string>
+    <string name="no_app">No app can open this file</string>
+    <string name="file_missing">File not found on storage</string>
+    <string name="computing">computing %1$d%%…</string>
+    <string name="copy">Copy</string>
+
+    <!-- Add dialog -->
+    <string name="add_download">Add download</string>
+    <string name="urls_hint">URLs, one per line (http/magnet)</string>
+    <string name="paste">Paste</string>
+    <string name="pick_torrent">Pick .torrent</string>
+    <string name="options">Options…</string>
+    <string name="options_count">Options (%1$d)</string>
+    <string name="download">Download</string>
+    <string name="cancel">Cancel</string>
+    <string name="apply">Apply</string>
+    <string name="ok">OK</string>
+
+    <!-- Detail dialog -->
+    <string name="detail_status">Status</string>
+    <string name="detail_gid">GID</string>
+    <string name="detail_progress">Progress</string>
+    <string name="detail_speed">Speed</string>
+    <string name="detail_dir">Save to</string>
+    <string name="detail_error">Error</string>
+    <string name="detail_files">Files (%1$d)</string>
+    <string name="edit_options">Edit options</string>
+    <string name="close">Close</string>
+    <string name="files_more">… %1$d more</string>
+    <string name="options_dialog_prefix">Options: %1$s</string>
+    <string name="options_new">Options for new download</string>
+    <string name="options_live_hint">Live-editable on active downloads</string>
+
+    <!-- Options editor -->
+    <string name="add_option">+ Add option</string>
+    <string name="add_option_title">Add option</string>
+    <string name="search">Search</string>
+    <string name="use_custom_key">Use custom key</string>
+    <string name="cd_remove_option">Remove option</string>
+
+    <!-- Settings -->
+    <string name="appearance">Appearance</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="rpc_section">RPC</string>
+    <string name="rpc_port">RPC listen port</string>
+    <string name="port_invalid">Port must be 1024–65535</string>
+    <string name="rpc_token">RPC secret token</string>
+    <string name="cd_random_token">Generate random token</string>
+    <string name="rpc_transport">RPC transport</string>
+    <string name="rpc_transport_sub">aria2 serves both on the same port — this picks how the app connects. WebSocket gets live engine events (status, notifications); HTTP polls once a second and has no push.</string>
+    <string name="listen_all">Listen on all interfaces</string>
+    <string name="listen_all_sub">⚠ Anyone on your LAN with the token can control the engine</string>
+    <string name="allow_origin">Allow all origins</string>
+    <string name="allow_origin_sub">Accept WebSocket from any origin</string>
+    <string name="engine_section">Engine</string>
+    <string name="download_dir">Download directory</string>
+    <string name="use_public_download">Use public Download folder</string>
+    <string name="storage_warning">⚠ needs All files access</string>
+    <string name="check_cert">Verify TLS certificates</string>
+    <string name="check_cert_sub">Needs a CA bundle (ca-certificate option) — no system store on Android</string>
+    <string name="save_session">Save session</string>
+    <string name="save_session_sub">Restore downloads across restarts</string>
+    <string name="speed_limits">Speed limits</string>
+    <string name="dl_limit">Download (KB/s)</string>
+    <string name="ul_limit">Upload (KB/s)</string>
+    <string name="limits_sub">0 or empty = unlimited. Applies to the whole engine.</string>
+    <string name="browse_dir">Browse…</string>
+    <string name="custom_options">Custom options</string>
+    <string name="forced_params_hint">Connectivity params (rpc-*, dir, session) are forced and can\'t be overridden</string>
+    <string name="perf_preset">Insert performance preset (-x16 -s64 -k1M)</string>
+    <string name="save_restart">Save &amp; restart engine</string>
+
+    <!-- About -->
+    <string name="app_version">App version</string>
+    <string name="engine_version_label">Engine</string>
+    <string name="aria2_next_version">aria2-next %1$s</string>
+    <string name="engine_stopped">stopped</string>
+    <string name="license_label">License</string>
+    <string name="license_engine">GPLv2+ (engine) — see assets/NOTICE.txt</string>
+
+    <!-- Engine event notifications -->
+    <string name="channel_events">Download events</string>
+    <string name="ev_started">started</string>
+    <string name="ev_completed">completed</string>
+    <string name="ev_error">failed</string>
+    <string name="ev_paused">paused</string>
+    <string name="ev_stopped">stopped</string>
+    <string name="ev_updated">updated</string>
+    <string name="ev_single">%1$s — %2$s</string>
+    <string name="notif_pause_all">Pause all</string>
+    <string name="notif_resume_all">Resume all</string>
+    <string name="notif_stop">Stop</string>
+</resources>
