@@ -1,0 +1,12 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+/build/
+**/build/
+.cxx/
+*.jks
+keystore.properties
+
+# Iteration working docs (kept local only)
+CODE_REVIEW.md
