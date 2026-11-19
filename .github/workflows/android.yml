@@ -10,16 +10,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
-
-      # compileSdk 37 — install the platform explicitly so AGP doesn't race it
+      # Runner image ships cmdline-tools + ANDROID_HOME already; just add the platform
       - name: Android SDK platform
         run: yes | sdkmanager "platforms;android-37" >/dev/null
 
@@ -47,14 +45,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-
-      - uses: android-actions/setup-android@v3
 
       - name: Android SDK platform
         run: yes | sdkmanager "platforms;android-37" >/dev/null
