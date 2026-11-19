@@ -668,22 +668,32 @@ private fun DownloadCard(
                 }
             }
 
-            // Exactly one contextual action, centred on the card's right
-            // edge. Deletion lives in long-press selection mode instead.
-            when (download.status) {
-                Download.Status.ACTIVE, Download.Status.WAITING ->
-                    IconButton(onClick = onPause) {
-                        Icon(Icons.Filled.Pause, contentDescription = stringResource(R.string.cd_pause))
-                    }
-                Download.Status.PAUSED ->
-                    IconButton(onClick = onResume) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.cd_resume))
-                    }
-                Download.Status.ERROR ->
-                    IconButton(onClick = onRetry) {
-                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.cd_retry))
-                    }
-                else -> {}
+            // Fixed-width right slot keeps every card's content edge
+            // aligned: one contextual action (pause/resume/retry), a
+            // static tick for COMPLETE, or a spacer. Deletion lives in
+            // long-press selection mode instead.
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                when (download.status) {
+                    Download.Status.ACTIVE, Download.Status.WAITING ->
+                        IconButton(onClick = onPause) {
+                            Icon(Icons.Filled.Pause, contentDescription = stringResource(R.string.cd_pause))
+                        }
+                    Download.Status.PAUSED ->
+                        IconButton(onClick = onResume) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.cd_resume))
+                        }
+                    Download.Status.ERROR ->
+                        IconButton(onClick = onRetry) {
+                            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.cd_retry))
+                        }
+                    Download.Status.COMPLETE ->
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    else -> {}
+                }
             }
         }
     }
