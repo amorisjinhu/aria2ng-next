@@ -23,7 +23,9 @@ async function cfg() {
 
 function notify(title, message) {
   try {
-    chrome.notifications.create({
+    // Fixed id: each notification REPLACES the previous one instead of
+    // stacking another entry in the OS tray.
+    chrome.notifications.create("aria2ng-next", {
       type: "basic",
       iconUrl: "icon128.png",
       title,
@@ -51,10 +53,14 @@ async function cookiesFor(url) {
 async function submit(url, ctx = {}) {
   const c = await cfg();
   if (!c.enabled) return { action: "disabled" };
+  // No token configured yet — fail fast with an actionable reason instead of
+  // a 401 round-trip per download.
+  if (!c.token || !c.token.trim()) return { action: "fallback", reason: "no-token" };
 
   const body = {
     url,
     ack: "final",
+    verify: "true",
     userAgent: navigator.userAgent,
     referer: ctx.referer,
     finalUrl: ctx.finalUrl,
@@ -67,6 +73,12 @@ async function submit(url, ctx = {}) {
   if (cookie) body.cookie = cookie;
   for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];
 
+  // Client-side deadline: the app holds ack:"final" up to 120 s, but a dozing
+  // phone can drop TCP silently (no RST) — without this, fetch hangs forever
+  // and the browser download stays paused indefinitely. 130 s > app budget,
+  // then fall back so the browser keeps the download.
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 130_000);
   try {
     const r = await fetch(`${c.apiBase}/add`, {
       method: "POST",
@@ -75,12 +87,15 @@ async function submit(url, ctx = {}) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      signal: ac.signal,
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) return { action: "fallback", reason: j.error || `http-${r.status}` };
     return j;
   } catch (_) {
     return { action: "fallback", reason: "unreachable" };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -104,6 +119,8 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
   const res = await submit(url, { referer: info.pageUrl });
   if (res.action === "accepted" || res.action === "added") {
     notify("aria2ng-next", chrome.i18n.getMessage("sentConfirm") || "Sent — confirm in the app");
+  } else if (res.reason === "no-token") {
+    notify("aria2ng-next", chrome.i18n.getMessage("noToken") || "Set the app token in the extension options first");
   } else if (res.action !== "disabled") {
     notify("aria2ng-next", `${chrome.i18n.getMessage("sendFailed") || "Send failed"}: ${res.reason || res.action}`);
   }
@@ -117,6 +134,9 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
 chrome.downloads.onDeterminingFilename.addListener(async (item) => {
   const c = await cfg();
   if (!c.enabled || !c.intercept) return;
+  // Unconfigured extension must be invisible: intercepting now would pause
+  // the download, 401, and spam a failure notification on EVERY download.
+  if (!c.token || !c.token.trim()) return;
   if (item.byExtensionId) return; // our own fallback re-download
   if (!/^https?:/i.test(item.url)) return;
   if (c.minBytes > 0 && item.fileSize > 0 && item.fileSize < c.minBytes) return;

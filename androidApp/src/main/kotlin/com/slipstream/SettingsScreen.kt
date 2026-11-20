@@ -234,13 +234,30 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxWidth(),
         )
         val ctx = androidx.compose.ui.platform.LocalContext.current
-        val isPublicDir = dir.startsWith("/storage/emulated/0/") && !dir.contains("/Android/data/")
+        val isPublicDir = isPublicStoragePath(dir)
+        // API 24–28: WRITE_EXTERNAL_STORAGE is a RUNTIME permission — declaring
+        // it in the manifest grants nothing, and "SDK < 30 → granted" silently
+        // sent users into EACCES. API 30+: all-files access via system page.
         val storageGranted =
-            Build.VERSION.SDK_INT < 30 || android.os.Environment.isExternalStorageManager()
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.os.Environment.isExternalStorageManager()
+            } else {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    ctx,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            }
+        val storagePermLauncher =
+            rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
         // SAF tree picker → /storage/... path the engine can actually use
         val dirPicker =
             rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-                uri?.let { treeUriToPath(it) }?.let { dir = it }
+                uri?.let { treeUriToPath(it) }?.let {
+                    dir = it
+                    if (Build.VERSION.SDK_INT < 30 && isPublicStoragePath(it) && !storageGranted) {
+                        storagePermLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    }
+                }
             }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { dirPicker.launch(null) }) {
@@ -248,20 +265,28 @@ fun SettingsScreen(
             }
             TextButton(onClick = {
                 dir = "/storage/emulated/0/Download"
-                if (Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) {
-                    openAllFilesAccess(ctx)
+                if (Build.VERSION.SDK_INT >= 30) {
+                    if (!android.os.Environment.isExternalStorageManager()) openAllFilesAccess(ctx)
+                } else if (!storageGranted) {
+                    storagePermLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 }
             }) { Text(stringResource(R.string.use_public_download)) }
             if (isPublicDir && !storageGranted) {
                 // Tap-through to the grant page — a bare warning leaves users stuck
                 Text(
-                    stringResource(R.string.storage_warning),
+                    stringResource(
+                        if (Build.VERSION.SDK_INT >= 30) R.string.storage_warning else R.string.storage_warning_legacy,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                     textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
                     modifier =
                         Modifier.clickable {
-                            if (Build.VERSION.SDK_INT >= 30) openAllFilesAccess(ctx)
+                            if (Build.VERSION.SDK_INT >= 30) {
+                                openAllFilesAccess(ctx)
+                            } else {
+                                storagePermLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            }
                         },
                 )
             }
@@ -317,30 +342,42 @@ fun SettingsScreen(
         Button(
             onClick = {
                 scope.launch {
-                    repo.saveExt(
-                        ExtApiSpec(
-                            enabled = extEnabled,
-                            port = extPort.toIntOrNull() ?: es!!.port,
-                            token = extToken.ifBlank { es!!.token },
-                            listenAll = extListenAll,
-                        ),
-                    )
-                    repo.save(
-                        EngineSpec(
-                            rpcPort = portNum ?: s!!.rpcPort,
-                            rpcToken = token.ifBlank { s!!.rpcToken },
-                            rpcListenAll = listenAll,
-                            rpcAllowOriginAll = allowOriginAll,
-                            rpcTransport = transport,
-                            dir = dir.ifEmpty { s!!.dir },
-                            checkCertificate = checkCert,
-                            saveSession = saveSession,
-                            dlLimitKbps = dlLimit.toIntOrNull() ?: 0,
-                            ulLimitKbps = ulLimit.toIntOrNull() ?: 0,
-                            customOptions = customOptions.result(),
-                        ),
-                    )
-                    onBack()
+                    // DataStore I/O can throw (disk full/IO error) — an uncaught
+                    // exception here crashes the app from a button tap.
+                    runCatching {
+                        repo.saveExt(
+                            ExtApiSpec(
+                                enabled = extEnabled,
+                                port = extPort.toIntOrNull() ?: es!!.port,
+                                token = extToken.ifBlank { es!!.token },
+                                listenAll = extListenAll,
+                            ),
+                        )
+                        repo.save(
+                            EngineSpec(
+                                rpcPort = portNum ?: s!!.rpcPort,
+                                rpcToken = token.ifBlank { s!!.rpcToken },
+                                rpcListenAll = listenAll,
+                                rpcAllowOriginAll = allowOriginAll,
+                                rpcTransport = transport,
+                                dir = dir.ifEmpty { s!!.dir },
+                                checkCertificate = checkCert,
+                                saveSession = saveSession,
+                                dlLimitKbps = dlLimit.toIntOrNull() ?: 0,
+                                ulLimitKbps = ulLimit.toIntOrNull() ?: 0,
+                                customOptions = customOptions.result(),
+                            ),
+                        )
+                    }.onSuccess {
+                        onBack()
+                    }.onFailure { e ->
+                        android.widget.Toast
+                            .makeText(
+                                ctx,
+                                ctx.getString(R.string.save_failed, e.message ?: e.toString()),
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                    }
                 }
             },
             // A saved-but-invalid ext port would bind-fail silently — block it
@@ -351,15 +388,21 @@ fun SettingsScreen(
     }
 }
 
-/** "primary:Download/x" → "/storage/emulated/0/Download/x"; sdcard volume id → "/storage/<id>/…". */
+/**
+ * "primary:Download/x" → "/storage/emulated/0/Download/x"; SD volume UUID →
+ * "/storage/<UUID>/…". Any other authority (cloud documents etc.) has NO
+ * filesystem path — returning a fabricated "/storage/<docId>" would point
+ * the engine at garbage, so reject it outright.
+ */
 private fun treeUriToPath(uri: android.net.Uri): String? {
     val docId = android.provider.DocumentsContract.getTreeDocumentId(uri) ?: return null
     val parts = docId.split(":", limit = 2)
+    val volume = parts[0]
     val base =
-        if (parts[0].equals("primary", ignoreCase = true)) {
-            "/storage/emulated/0"
-        } else {
-            "/storage/${parts[0]}"
+        when {
+            volume.equals("primary", ignoreCase = true) -> "/storage/emulated/0"
+            Regex("[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}").matches(volume) -> "/storage/$volume"
+            else -> return null
         }
     val rel = parts.getOrElse(1) { "" }
     return if (rel.isEmpty()) base else "$base/$rel"
@@ -402,9 +445,22 @@ private fun SettingLink(
     }
 }
 
+/** Settings pages can be absent on stripped OEM builds — never crash on the jump. */
+private fun startSettings(
+    ctx: android.content.Context,
+    intent: android.content.Intent,
+) {
+    runCatching { ctx.startActivity(intent) }.onFailure {
+        android.widget.Toast
+            .makeText(ctx, ctx.getString(R.string.settings_page_failed), android.widget.Toast.LENGTH_SHORT)
+            .show()
+    }
+}
+
 /** Deep-link into the ext-request channel's alert toggles (banner/sound/lockscreen). */
 private fun openChannelSettings(ctx: android.content.Context) {
-    ctx.startActivity(
+    startSettings(
+        ctx,
         android.content
             .Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
             .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
@@ -434,7 +490,7 @@ private fun openBgPopupSettings(ctx: android.content.Context) {
                 android.net.Uri.parse("package:${ctx.packageName}"),
             )
         }
-    ctx.startActivity(intent)
+    startSettings(ctx, intent)
 }
 
 /**
@@ -456,12 +512,13 @@ private fun requestBatteryWhitelist(ctx: android.content.Context) {
                 android.net.Uri.parse("package:${ctx.packageName}"),
             )
         }
-    ctx.startActivity(intent)
+    startSettings(ctx, intent)
 }
 
 /** Jump to this app's "All files access" grant page (API 30+). */
 private fun openAllFilesAccess(ctx: android.content.Context) {
-    ctx.startActivity(
+    startSettings(
+        ctx,
         android.content.Intent(
             android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
             android.net.Uri.parse("package:${ctx.packageName}"),

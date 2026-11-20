@@ -79,6 +79,14 @@ data class Download(
 
         private fun JsonObject.lng(key: String): Long = str(key)?.toLongOrNull() ?: 0L
 
+        /** Magnet URIs have no path — the display name lives in the dn= parameter. */
+        private fun nameFromUri(uri: String): String? =
+            if (uri.startsWith("magnet:")) {
+                uri.substringAfter("dn=", "").substringBefore('&').takeIf { it.isNotEmpty() }
+            } else {
+                uri.substringAfterLast('/').substringBefore('?').takeIf { it.isNotEmpty() }
+            }
+
         fun fromJson(o: JsonObject): Download {
             val btName =
                 o["bittorrent"]
@@ -105,9 +113,7 @@ data class Download(
                         ?.get("uri")
                         ?.jsonPrimitive
                         ?.content
-                        ?.substringAfterLast('/')
-                        ?.substringBefore('?')
-                        ?.takeIf { it.isNotEmpty() }
+                        ?.let(::nameFromUri)
 
             val gid = o["gid"]!!.jsonPrimitive.content
 

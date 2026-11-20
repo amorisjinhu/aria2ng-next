@@ -1,15 +1,29 @@
-Slipstream
-==========
+Slipstream (aria2ng-next)
+=========================
+
+Application code: Copyright (c) 2026 amorisjinhu. All rights reserved.
+No license is granted to the application source code at this time; it is
+made available for personal use and evaluation only.
 
 This application bundles the following third-party component:
 
 aria2-next 3.1.1 — multi-protocol download engine
 License: GNU General Public License v2.0 or later (with OpenSSL linking exception)
-Source: https://github.com/maboroshin/aria2-next
+Upstream: https://github.com/AnInsomniacy/aria2-next
+Pinned release: tag v3.1.1, commit 1b8fb72fcf63dc9e78807f20039708184bce0ad2
+Binary: libaria2c.so (arm64-v8a), bundled prebuilt
+SHA-256: 8f06939d8786c06204a099a3b9ff19d76ce063f62781eed155d9f3dbf04ea973
+
+Corresponding source (GPLv2 §3): the complete corresponding source code for
+the bundled binary is available from the upstream repository at the pinned
+commit above. In addition, the maintainer offers to provide the corresponding
+source on request via https://github.com/amorisjinhu/aria2ng-next/issues —
+this written offer is valid for three years from the date of distribution.
 
 The engine is distributed as a standalone program executed by this
 application and controlled via its JSON-RPC interface; it is a separate
 work from the application code as described by GPL "mere aggregation".
 
-All other components (application code, Kotlin/Ktor/Compose libraries)
-are distributed under their respective permissive licenses.
+Third-party libraries (Kotlin, Ktor, Jetpack Compose, kotlinx.*) are
+distributed under their respective permissive licenses; see each project's
+LICENSE for details.

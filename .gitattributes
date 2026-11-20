@@ -1,0 +1,5 @@
+# Keep the CA bundle byte-exact (LF) so its SHA-256 matches the recorded
+# provenance value across checkouts; CRLF normalization would change it.
+*.pem text eol=lf
+# Prebuilt engine binary — never normalize.
+*.so binary

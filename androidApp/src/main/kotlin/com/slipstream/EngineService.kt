@@ -96,6 +96,19 @@ class EngineService : Service() {
                 runCatching { postDownloadEvent(batch) } // a malformed event must not kill the loop
             }
         }
+
+        // The persistent FGS notification must track reality: a static "is running"
+        // line kept claiming success while the engine sat in Failed — with no
+        // other Failed.reason surface, catastrophic failures were undiagnosable.
+        scope.launch {
+            engine.state.collect { st ->
+                if (wantRunning) {
+                    runCatching {
+                        NotificationManagerCompat.from(this@EngineService).notify(NOTIFICATION_ID, buildNotification(st))
+                    }
+                }
+            }
+        }
     }
 
     override fun onStartCommand(
@@ -112,16 +125,22 @@ class EngineService : Service() {
             }
             ACTION_PAUSE_ALL -> scope.launch { runCatching { engine.manager.pauseAll() } }
             ACTION_RESUME_ALL -> scope.launch { runCatching { engine.manager.unpauseAll() } }
-            // Notification action buttons — act on the queue head; the
-            // extPending collector reposts or cancels as the queue moves.
-            ACTION_EXT_CONFIRM ->
-                engine.extPending.value.firstOrNull()?.let { p ->
+            // Notification action buttons — act on the item the notification
+            // SHOWED (by id), never the queue head at click time: the head may
+            // have been claimed/replaced since, and confirming a request the
+            // user never saw breaks the confirm-first invariant.
+            ACTION_EXT_CONFIRM -> {
+                val id = intent.getLongExtra(EXTRA_PENDING_ID, -1)
+                engine.extPending.value.firstOrNull { it.id == id }?.let { p ->
                     scope.launch { runCatching { engine.confirmExtAdd(p) } }
                 }
-            ACTION_EXT_DECLINE ->
+            }
+            ACTION_EXT_DECLINE -> {
+                val id = intent.getLongExtra(EXTRA_PENDING_ID, -1)
                 engine.extPending.value
-                    .firstOrNull()
+                    .firstOrNull { it.id == id }
                     ?.let { engine.dismissExtAdd(it) }
+            }
             else -> {
                 startForeground(NOTIFICATION_ID, buildNotification())
                 wantRunning = true
@@ -141,9 +160,12 @@ class EngineService : Service() {
     // API 34 (1-arg) / API 35+ (2-arg): dataSync FGS hits its 6h/24h cap and the
     // system calls back here — not stopping in time crashes with
     // ForegroundServiceDidNotStopInTimeException. Stop the engine so aria2 can
-    // save its session before the process winds down.
+    // save its session before the process winds down. Tell the USER too: a
+    // silent stop mid-download looks like "still downloading" forever.
     @Suppress("DEPRECATION")
     override fun onTimeout(startId: Int) {
+        wantRunning = false
+        postTimeoutNotification()
         engine.stop()
         stopSelf()
     }
@@ -152,8 +174,25 @@ class EngineService : Service() {
         startId: Int,
         fgsType: Int,
     ) {
+        wantRunning = false
+        postTimeoutNotification()
         engine.stop()
         stopSelf()
+    }
+
+    private fun postTimeoutNotification() {
+        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) return
+        val n =
+            NotificationCompat
+                .Builder(this, EVENT_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle(getString(R.string.app_name))
+                .setContentText(getString(R.string.notif_timeout))
+                .setStyle(NotificationCompat.BigTextStyle().bigText(getString(R.string.notif_timeout)))
+                .setContentIntent(openAppIntent())
+                .setAutoCancel(true)
+                .build()
+        runCatching { NotificationManagerCompat.from(this).notify(TIMEOUT_NOTIFICATION_ID, n) }
     }
 
     override fun onDestroy() {
@@ -173,7 +212,7 @@ class EngineService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(state: EngineProcess.State = engine.state.value): Notification {
         val stop =
             PendingIntent.getService(
                 this,
@@ -195,11 +234,18 @@ class EngineService : Service() {
                 Intent(this, EngineService::class.java).setAction(ACTION_RESUME_ALL),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+        val text =
+            when (state) {
+                is EngineProcess.State.Running -> getString(R.string.notif_engine_running)
+                is EngineProcess.State.Starting -> getString(R.string.notif_engine_starting)
+                is EngineProcess.State.Failed -> getString(R.string.notif_engine_failed, state.reason)
+                EngineProcess.State.Stopped -> getString(R.string.notif_engine_stopped)
+            }
         return NotificationCompat
             .Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(getString(R.string.app_name) + " engine")
-            .setContentText("aria2-next is running")
+            .setContentText(text)
             .setContentIntent(openAppIntent())
             .setOngoing(true)
             .addAction(0, getString(R.string.notif_pause_all), pauseAll)
@@ -284,7 +330,9 @@ class EngineService : Service() {
                     PendingIntent.getService(
                         this,
                         10,
-                        Intent(this, EngineService::class.java).setAction(ACTION_EXT_CONFIRM),
+                        Intent(this, EngineService::class.java)
+                            .setAction(ACTION_EXT_CONFIRM)
+                            .putExtra(EXTRA_PENDING_ID, list.first().id),
                         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                     ),
                 ).addAction(
@@ -293,7 +341,9 @@ class EngineService : Service() {
                     PendingIntent.getService(
                         this,
                         11,
-                        Intent(this, EngineService::class.java).setAction(ACTION_EXT_DECLINE),
+                        Intent(this, EngineService::class.java)
+                            .setAction(ACTION_EXT_DECLINE)
+                            .putExtra(EXTRA_PENDING_ID, list.first().id),
                         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                     ),
                 ).setAutoCancel(true)
@@ -307,7 +357,7 @@ class EngineService : Service() {
             nm.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_ID,
-                    "Download engine",
+                    getString(R.string.channel_engine),
                     NotificationManager.IMPORTANCE_LOW,
                 ),
             )
@@ -338,6 +388,7 @@ class EngineService : Service() {
         private const val EVENT_NOTIFICATION_ID = 2
         private const val EXT_NOTIFICATION_ID = 3
         const val REVEAL_NOTIFICATION_ID = 4
+        private const val TIMEOUT_NOTIFICATION_ID = 5
         private const val EVENT_WINDOW_MS = 2_500L
         const val ACTION_START = "com.slipstream.action.START"
         const val ACTION_STOP = "com.slipstream.action.STOP"
@@ -345,6 +396,7 @@ class EngineService : Service() {
         const val ACTION_RESUME_ALL = "com.slipstream.action.RESUME_ALL"
         const val ACTION_EXT_CONFIRM = "com.slipstream.action.EXT_CONFIRM"
         const val ACTION_EXT_DECLINE = "com.slipstream.action.EXT_DECLINE"
+        const val EXTRA_PENDING_ID = "pending_id"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(
@@ -354,7 +406,11 @@ class EngineService : Service() {
         }
 
         fun stop(context: Context) {
-            context.startService(Intent(context, EngineService::class.java).setAction(ACTION_STOP))
+            // startService throws ISE from the background on API 26+; current
+            // callers are foreground UI, but a background caller must not crash.
+            runCatching {
+                context.startService(Intent(context, EngineService::class.java).setAction(ACTION_STOP))
+            }
         }
     }
 }

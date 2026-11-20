@@ -36,10 +36,13 @@ data class EngineSpec(
     /**
      * @param sessionPath absolute path of the session file (input/save)
      * @param caCertificatePath optional CA bundle for check-certificate
+     * @param parentPid app process pid — aria2 self-terminates when it dies,
+     *        so a crashed/killed app never leaves an orphan engine holding the port
      */
     fun args(
         sessionPath: String,
         caCertificatePath: String? = null,
+        parentPid: Int? = null,
     ): List<String> {
         val params = LinkedHashMap<String, String?>()
 
@@ -64,9 +67,11 @@ data class EngineSpec(
         params["--rpc-listen-all"] = rpcListenAll.toString()
         params["--rpc-allow-origin-all"] = rpcAllowOriginAll.toString()
         params["--dir"] = dir
-        // Typed fields beat a conflicting max-overall-* key in customOptions
-        if (dlLimitKbps > 0) params["--max-overall-download-limit"] = "${dlLimitKbps}K"
-        if (ulLimitKbps > 0) params["--max-overall-upload-limit"] = "${ulLimitKbps}K"
+        // Typed fields beat a conflicting max-overall-* key in customOptions —
+        // emitted even at 0 (= unlimited) so a stale custom key can't win.
+        params["--max-overall-download-limit"] = "${dlLimitKbps}K"
+        params["--max-overall-upload-limit"] = "${ulLimitKbps}K"
+        if (parentPid != null) params["--stop-with-process"] = parentPid.toString()
         if (saveSession) {
             params["--input-file"] = sessionPath
             params["--save-session"] = sessionPath

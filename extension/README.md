@@ -44,6 +44,14 @@ the request; the confirm dialog owns it from there. `ack:"final"` = response
 waits up to 120 s for the user's answer; timeout → `{action:"fallback",
 reason:"unconfirmed"}` and the browser should keep its download.
 
+> **Protocol caveat for third-party clients (`ack:"early"`):** "accepted" only
+> means *queued for confirmation*, not *downloaded*. If the user then declines
+> in the app, an early-ack client has already cancelled its browser copy —
+> the download exists on neither side. This app's own extension uses
+> `ack:"final"` and is immune (decline → browser resumes). Clients that must
+> not lose downloads should use `ack:"final"`; with early-ack, treat a later
+> in-app decline as "re-initiate the browser download".
+
 `verify:true` is honored: before queueing, `aria2.probe` (aria2-next RPC)
 fetches the first byte with the request's own headers/cookie/referer. HTML
 where the browser saw a file → `fallback:web-page`; probe transport failure

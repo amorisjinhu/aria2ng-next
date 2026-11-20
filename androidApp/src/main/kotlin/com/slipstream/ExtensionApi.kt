@@ -5,8 +5,11 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -17,6 +20,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import java.io.BufferedInputStream
 import java.io.InputStream
 import java.io.InterruptedIOException
 import java.io.OutputStream
@@ -24,6 +28,8 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.util.concurrent.TimeUnit
 
 /** Settings for the browser-extension API — app-level, NOT part of EngineSpec (no engine restart). */
 data class ExtApiSpec(
@@ -62,7 +68,15 @@ class PendingAdd(
     val claimed: java.util.concurrent.atomic.AtomicBoolean =
         java.util.concurrent.atomic
             .AtomicBoolean(false),
-)
+    /** Stable identity — notification buttons must act on the item they SHOWED, not the queue head at click time. */
+    val id: Long = IDS.incrementAndGet(),
+) {
+    companion object {
+        private val IDS =
+            java.util.concurrent.atomic
+                .AtomicLong(0)
+    }
+}
 
 /**
  * Rayburst-style Extension API: a small HTTP server inside the app that
@@ -85,33 +99,57 @@ class ExtensionApiServer(
     @Volatile
     private var serverSocket: ServerSocket? = null
 
+    // Loopback is reachable by ANY app on the device — cap concurrent handlers
+    // so a slow-loris herd can't exhaust coroutines/sockets.
+    private val connLimit = Semaphore(MAX_CONNECTIONS)
+
     fun start() {
         acceptJob =
             scope.launch(Dispatchers.IO) {
+                // v4 loopback: extension apiBase is documented as 127.0.0.1,
+                // so an explicit v4 bind avoids localhost→::1 mismatches.
+                val bind = if (spec.listenAll) null else InetAddress.getByName("127.0.0.1")
+                // A predecessor may hold the port for a few ms after stop()
+                // (accept() is uninterruptible; its socket closes when the
+                // cancelled loop exits) — retry the bind instead of dying for good.
+                var ss: ServerSocket? = null
+                var attempts = 0
+                while (isActive && ss == null && attempts++ < BIND_RETRIES) {
+                    ss =
+                        try {
+                            ServerSocket(spec.port, 16, bind)
+                        } catch (e: SocketException) {
+                            delay(BIND_RETRY_MS)
+                            null
+                        }
+                }
+                if (ss == null) {
+                    if (isActive) logger("ext-api bind failed :${spec.port} — gave up after $BIND_RETRIES attempts")
+                    return@launch
+                }
                 try {
-                    // v4 loopback: extension apiBase is documented as 127.0.0.1,
-                    // so an explicit v4 bind avoids localhost→::1 mismatches.
-                    val bind = if (spec.listenAll) null else InetAddress.getByName("127.0.0.1")
-                    ServerSocket(spec.port, 16, bind).use { ss ->
-                        serverSocket = ss
+                    ss.use { server ->
+                        serverSocket = server
                         logger("ext-api listening on ${if (spec.listenAll) "0.0.0.0" else "127.0.0.1"}:${spec.port}")
                         while (isActive) {
-                            val s = ss.accept()
+                            val s = server.accept()
                             launch {
-                                try {
-                                    s.use { handle(it) }
-                                } catch (e: InterruptedIOException) {
-                                    // header/body read timeout — drop silently
-                                } catch (e: SocketException) {
-                                    // client went away mid-request — normal
-                                } catch (e: Exception) {
-                                    logger("ext-api: ${e.message}")
+                                connLimit.withPermit {
+                                    try {
+                                        s.use { handle(it) }
+                                    } catch (e: InterruptedIOException) {
+                                        // header/body read timeout — drop silently
+                                    } catch (e: SocketException) {
+                                        // client went away mid-request — normal
+                                    } catch (e: Exception) {
+                                        logger("ext-api: ${e.message}")
+                                    }
                                 }
                             }
                         }
                     }
                 } catch (e: SocketException) {
-                    if (isActive) logger("ext-api bind failed :${spec.port} — ${e.message}")
+                    if (isActive) logger("ext-api failed :${spec.port} — ${e.message}")
                 } catch (e: Exception) {
                     if (isActive) logger("ext-api failed: ${e.message}")
                 } finally {
@@ -130,22 +168,36 @@ class ExtensionApiServer(
 
     private suspend fun handle(s: Socket) {
         s.soTimeout = READ_TIMEOUT_MS
-        val input = s.getInputStream()
+        // Buffered: readLineLimited below walks byte-by-byte — unbuffered that
+        // is one syscall per byte. The deadline caps the WHOLE request: soTimeout
+        // alone resets per read, so a slow-loris drip could hold us forever.
+        val input = BufferedInputStream(s.getInputStream(), 8192)
         val out = s.getOutputStream()
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(REQUEST_DEADLINE_S)
 
-        val requestLine = readLineLimited(input) ?: return
+        val requestLine = readLineLimited(input, deadline) ?: return
         val parts = requestLine.split(' ')
         if (parts.size < 2) return respond(out, 400, """{"error":"bad-request"}""")
         val method = parts[0].uppercase()
         val path = parts[1].substringBefore('?')
 
         val headers = HashMap<String, String>(16)
+        var rawLines = 0
         while (true) {
-            val line = readLineLimited(input) ?: return
+            val line = readLineLimited(input, deadline) ?: return
             if (line.isEmpty()) break
+            // Raw line cap: the unique-name cap below doesn't count duplicates.
+            if (++rawLines > MAX_HEADER_LINES) return respond(out, 431, """{"error":"headers-too-large"}""")
             val i = line.indexOf(':')
             if (i > 0) headers[line.substring(0, i).trim().lowercase()] = line.substring(i + 1).trim()
             if (headers.size > MAX_HEADERS) return respond(out, 431, """{"error":"headers-too-large"}""")
+        }
+
+        // DNS-rebinding guard: a hostile page resolving its domain to 127.0.0.1
+        // sends Host: attacker.example — only literal loopback/LAN IPs pass.
+        val host = headers["host"]?.substringBeforeLast(':')?.trim('[', ']')
+        if (host != null && !HOST_LITERAL.matches(host)) {
+            return respond(out, 403, """{"error":"forbidden-host"}""")
         }
 
         if (method == "OPTIONS") {
@@ -208,7 +260,7 @@ class ExtensionApiServer(
                 )
             method == "GET" && path == "/stat" -> respond(out, 200, statJson())
             method == "GET" && path == "/tasks" -> respond(out, 200, tasksJson())
-            method == "POST" && path == "/add" -> handleAdd(input, out, headers)
+            method == "POST" && path == "/add" -> handleAdd(input, out, headers, deadline)
             method == "POST" && path == "/pause-all" -> handleAll(out, pause = true)
             method == "POST" && path == "/resume-all" -> handleAll(out, pause = false)
             method == "POST" && path.startsWith("/tasks/") -> handleTaskOp(out, path)
@@ -227,11 +279,12 @@ class ExtensionApiServer(
         input: InputStream,
         out: OutputStream,
         headers: Map<String, String>,
+        deadline: Long,
     ) {
         val len = headers["content-length"]?.toIntOrNull() ?: 0
         if (len <= 0) return respond(out, 411, """{"error":"length-required"}""")
         if (len > MAX_BODY) return respond(out, 413, """{"error":"body-too-large"}""")
-        val body = ByteArray(len).also { input.readFully(it) }
+        val body = ByteArray(len).also { input.readFully(it, deadline) }
 
         val obj =
             runCatching { Json.parseToJsonElement(body.decodeToString()).jsonObject }.getOrNull()
@@ -245,14 +298,15 @@ class ExtensionApiServer(
         }
 
         // Merge caller headers + cookie/UA/referer into aria2 options.
+        // CRLF in a name/value would inject extra header lines into the engine.
         val headerLines = mutableListOf<String>()
         (obj["requestHeaders"] as? JsonArray)?.forEach { h ->
             val o = h as? JsonObject ?: return@forEach
             val n = o["name"]?.jsonPrimitive?.contentOrNull?.trim()
             val v = o["value"]?.jsonPrimitive?.contentOrNull
-            if (!n.isNullOrEmpty() && v != null) headerLines += "$n: $v"
+            if (!n.isNullOrEmpty() && v != null && !n.hasCrlf() && !v.hasCrlf()) headerLines += "$n: $v"
         }
-        str("cookie")?.let { headerLines += "Cookie: $it" }
+        str("cookie")?.takeIf { !it.hasCrlf() }?.let { headerLines += "Cookie: $it" }
 
         val opts = mutableMapOf<String, String>()
         if (headerLines.isNotEmpty()) opts["header"] = headerLines.joinToString("\r\n")
@@ -290,8 +344,12 @@ class ExtensionApiServer(
                 sizeBytes = probeInfo?.totalLength ?: obj["size"]?.jsonPrimitive?.longOrNull,
                 referer = str("referer"),
             )
+        if (engine.extPending.value.size >= EngineProcess.MAX_EXT_PENDING) {
+            return respond(out, 429, """{"error":"queue-full"}""")
+        }
         engine.enqueueExtAdd(pending)
-        logger("ext-api add: ${pending.displayName} (${pending.sizeBytes ?: -1}B) ← $url")
+        // Query strings can carry credentials — keep them out of the log.
+        logger("ext-api add: ${pending.displayName} (${pending.sizeBytes ?: -1}B) ← ${url.substringBefore('?')}")
 
         if (str("ack") != "final") {
             // early: extension drops its download now; the in-app dialog owns it
@@ -304,11 +362,29 @@ class ExtensionApiServer(
             AddVerdict.Cancelled -> respond(out, 200, """{"action":"cancelled"}""")
             is AddVerdict.Failed -> respond(out, 200, """{"action":"fallback","reason":"rejected"}""")
             null -> {
-                engine.dismissExtAdd(pending)
-                respond(out, 200, """{"action":"fallback","reason":"unconfirmed"}""")
+                // The dialog may have claimed it a hair before the timeout —
+                // give the in-flight add a grace window instead of letting the
+                // browser resume into a double download.
+                val late =
+                    if (pending.claimed.get()) {
+                        withTimeoutOrNull(CONFIRM_GRACE_MS) { pending.verdict.await() }
+                    } else {
+                        null
+                    }
+                when (late) {
+                    is AddVerdict.Added -> respond(out, 200, """{"action":"added","gid":"${late.gid}"}""")
+                    AddVerdict.Cancelled -> respond(out, 200, """{"action":"cancelled"}""")
+                    is AddVerdict.Failed -> respond(out, 200, """{"action":"fallback","reason":"rejected"}""")
+                    null -> {
+                        engine.dismissExtAdd(pending)
+                        respond(out, 200, """{"action":"fallback","reason":"unconfirmed"}""")
+                    }
+                }
             }
         }
     }
+
+    private fun String.hasCrlf(): Boolean = any { it == '\r' || it == '\n' }
 
     /**
      * aria2.probe(uri, options) — first byte with the request's own options.
@@ -346,8 +422,14 @@ class ExtensionApiServer(
             try {
                 withTimeoutOrNull(VERIFY_TIMEOUT_MS) { engine.client.call("aria2.probe", params) }
             } catch (e: com.slipstream.rpc.Aria2Client.Aria2RpcException) {
-                logger("ext-api: probe unsupported/failed RPC-side (${e.message}) — skipping verify")
-                return ProbeResult.Ok(ProbeInfo(null, null)) // method absent → unverified add
+                // -32601 = method absent (upstream aria2) → unverified add.
+                // Any OTHER RPC error is a real probe failure → fallback.
+                if (e.code == -32601) {
+                    logger("ext-api: probe unsupported RPC-side — skipping verify")
+                    return ProbeResult.Ok(ProbeInfo(null, null))
+                }
+                logger("ext-api: probe failed RPC-side (${e.message})")
+                return ProbeResult.Unavailable
             } catch (_: Exception) {
                 null
             }
@@ -404,8 +486,11 @@ class ExtensionApiServer(
         val all = engine.manager.downloads.value
         val live =
             all.filter { it.status in setOf(Download.Status.ACTIVE, Download.Status.WAITING, Download.Status.PAUSED) }
-        // Contract: unfinished in queue order, then the ten latest finished.
-        val finished = all - live.toSet()
+        // Contract: unfinished in queue order, then the ten latest finished —
+        // history included, so /tasks isn't empty right after an engine restart.
+        val finished =
+            (all - live.toSet()) +
+                engine.history.value.filterNot { h -> all.any { it.gid == h.gid } }
         return buildJsonObject {
             put(
                 "stat",
@@ -481,9 +566,11 @@ class ExtensionApiServer(
                 200 -> "OK"
                 400 -> "Bad Request"
                 401 -> "Unauthorized"
+                403 -> "Forbidden"
                 404 -> "Not Found"
                 411 -> "Length Required"
                 413 -> "Content Too Large"
+                429 -> "Too Many Requests"
                 431 -> "Request Header Fields Too Large"
                 500 -> "Internal Server Error"
                 503 -> "Service Unavailable"
@@ -502,9 +589,13 @@ class ExtensionApiServer(
         out.flush()
     }
 
-    private fun InputStream.readFully(buf: ByteArray) {
+    private fun InputStream.readFully(
+        buf: ByteArray,
+        deadline: Long,
+    ) {
         var off = 0
         while (off < buf.size) {
+            if (System.nanoTime() > deadline) throw SocketTimeoutException("request deadline")
             val n = read(buf, off, buf.size - off)
             if (n < 0) throw SocketException("eof")
             off += n
@@ -512,9 +603,13 @@ class ExtensionApiServer(
     }
 
     /** Reads one CRLF/LF line with a hard cap — protects the parser from junk. */
-    private fun readLineLimited(input: InputStream): String? {
+    private fun readLineLimited(
+        input: InputStream,
+        deadline: Long,
+    ): String? {
         val buf = StringBuilder()
         while (buf.length < MAX_LINE) {
+            if (System.nanoTime() > deadline) throw SocketTimeoutException("request deadline")
             val b = input.read()
             if (b < 0) return null
             if (b == '\n'.code) return buf.toString().removeSuffix("\r")
@@ -526,12 +621,21 @@ class ExtensionApiServer(
     companion object {
         private const val MAX_LINE = 8192
         private const val MAX_HEADERS = 64
+        private const val MAX_HEADER_LINES = 128
         private const val MAX_BODY = 256 * 1024 // Rayburst's body limit
+        private const val MAX_CONNECTIONS = 8
         private const val READ_TIMEOUT_MS = 30_000
+        private const val REQUEST_DEADLINE_S = 30L
         private const val CONFIRM_TIMEOUT_MS = 120_000L
+        private const val CONFIRM_GRACE_MS = 10_000L
         private const val VERIFY_TIMEOUT_MS = 8_000L // Rayburst's probe budget
+        private const val BIND_RETRIES = 20
+        private const val BIND_RETRY_MS = 300L
         private const val CORS_HEADERS = "Access-Control-Allow-Origin: *\r\n"
-        private val SUPPORTED_SCHEME = Regex("""^(https?|ftp|magnet|ed2k|thunder):""")
+        private val SUPPORTED_SCHEME = Regex("""^(https?|ftp|magnet|ed2k|thunder):""", RegexOption.IGNORE_CASE)
+
+        // Loopback names + literal IPv4/IPv6 only — a DNS-rebound Host is a name.
+        private val HOST_LITERAL = Regex("""^(localhost|127\.0\.0\.1|::1|(\d{1,3}\.){3}\d{1,3}|[0-9A-Fa-f:]+)$""")
 
         /**
          * Filename hints cross a trust boundary (browser → engine fs): keep one

@@ -490,7 +490,9 @@ fun OptionsEditor(
                         Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cd_remove_option))
                     }
                 },
-                singleLine = true,
+                // header takes multiple lines (one per header) — singleLine
+                // would make multi-header values impossible to enter.
+                singleLine = key != "header",
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -527,7 +529,14 @@ private fun OptionKeyPickerDialog(
         query
             .trim()
             .lowercase()
-            .takeIf { it.isNotEmpty() && it.all { c -> c.isLetterOrDigit() || c == '-' } && it !in existing }
+            // Must start alphanumeric: a leading '-' would produce malformed
+            // keys like "---split" once args() prefixes "--".
+            .takeIf {
+                it.isNotEmpty() &&
+                    it.first().isLetterOrDigit() &&
+                    it.all { c -> c.isLetterOrDigit() || c == '-' } &&
+                    it !in existing
+            }
 
     AlertDialog(
         onDismissRequest = onDismiss,

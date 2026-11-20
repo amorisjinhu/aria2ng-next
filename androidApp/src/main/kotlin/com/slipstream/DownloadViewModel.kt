@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.slipstream.model.Download
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.cancellation.CancellationException
@@ -77,11 +79,14 @@ class DownloadViewModel(
     }
 
     // Every manager call can throw (Aria2RpcException / Not connected / timeout).
-    // Catch, let cancellation through, and surface the rest as a snackbar.
+    // Catch and surface as a snackbar — including INNER timeouts: the client's
+    // withTimeout raises TimeoutCancellationException (a CancellationException),
+    // but our job is still active, so rethrowing it would kill this coroutine
+    // silently and the user gets zero feedback on a hung engine.
     private fun rpcOp(block: suspend () -> Unit) {
         viewModelScope.launch {
             runCatching { block() }.onFailure { e ->
-                if (e is CancellationException) throw e
+                if (e is CancellationException && !isActive) throw e
                 _events.emit(
                     getApplication<Application>().getString(R.string.rpc_failed, e.message ?: e.toString()),
                 )
@@ -137,8 +142,11 @@ class DownloadViewModel(
         urls: List<String>,
         opts: Map<String, String>,
     ) {
-        rpcOp { engine.manager.add(urls, opts.takeIf { it.isNotEmpty() }) }
-        _addDialogText.value = null
+        rpcOp {
+            engine.manager.add(urls, opts.takeIf { it.isNotEmpty() })
+            // Close only on success — a failed add must not eat the draft.
+            _addDialogText.value = null
+        }
     }
 
     fun addTorrent(uri: Uri) {
@@ -146,8 +154,29 @@ class DownloadViewModel(
             // Payload read off the main thread — a multi-MB .torrent must not jank the UI.
             val base64 =
                 withContext(Dispatchers.IO) {
-                    val bytes = getApplication<Application>().contentResolver.openInputStream(uri)!!.readBytes()
-                    android.util.Base64.encodeToString(bytes, android.util.Base64.DEFAULT)
+                    val app = getApplication<Application>()
+                    val input =
+                        app.contentResolver.openInputStream(uri)
+                            ?: throw java.io.IOException(app.getString(R.string.torrent_unreadable))
+                    val bytes =
+                        input.use { ins ->
+                            // Bounded read: a mispicked giant file must not OOM the app.
+                            val buf = java.io.ByteArrayOutputStream()
+                            val chunk = ByteArray(8192)
+                            var total = 0
+                            while (true) {
+                                val n = ins.read(chunk)
+                                if (n < 0) break
+                                total += n
+                                if (total > MAX_TORRENT_BYTES) {
+                                    throw java.io.IOException(app.getString(R.string.torrent_too_large))
+                                }
+                                buf.write(chunk, 0, n)
+                            }
+                            buf.toByteArray()
+                        }
+                    // NO_WRAP: DEFAULT inserts newlines the engine may not tolerate.
+                    android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                 }
             engine.manager.addTorrent(base64)
         }
@@ -161,8 +190,10 @@ class DownloadViewModel(
         gid: String,
         map: Map<String, String>,
     ) {
-        rpcOp { engine.manager.setOptions(gid, map) }
-        _optionsEdit.value = null
+        rpcOp {
+            engine.manager.setOptions(gid, map)
+            _optionsEdit.value = null // keep the editor open on failure
+        }
     }
 
     /** aria2 has no retry RPC: clear the dead entry, re-add with its URIs. */
@@ -180,9 +211,15 @@ class DownloadViewModel(
                     runCatching { engine.manager.getOption(d.gid) }.getOrNull()
                 }
             if (!d.persisted) {
-                // error/complete → clear the result; live statuses → remove the task
+                // error/complete → clear the result; live statuses → remove the task.
+                // A failed remove must ABORT: re-adding on top of a live task is a
+                // double download of the same URI.
                 if (d.status in setOf(Download.Status.ACTIVE, Download.Status.WAITING, Download.Status.PAUSED)) {
-                    runCatching { engine.manager.remove(d.gid) }
+                    val removed = runCatching { engine.manager.remove(d.gid) }
+                    if (removed.isFailure) {
+                        _events.emit(getApplication<Application>().getString(R.string.retry_remove_failed))
+                        return@rpcOp
+                    }
                 } else {
                     runCatching { engine.manager.clearResult(d.gid) }
                 }
@@ -201,21 +238,36 @@ class DownloadViewModel(
         val targets = downloads.value.filter { it.gid in _selected.value }
         rpcOp {
             var failed = 0
+            var fileProblems = 0
             targets.forEach { d ->
                 val live = d.status in setOf(Download.Status.ACTIVE, Download.Status.WAITING, Download.Status.PAUSED)
-                // File wipe is only safe once the task is actually gone —
-                // deleting payload out from under a live aria2 write loses data.
+                // forceRemove, not remove: remove stops active tasks asynchronously
+                // (disk flush can take seconds) and the immediate clearResult below
+                // would hit "GID not found" → the stopped result survives → the
+                // "deleted" task resurrects on the next refresh.
                 val stopped =
                     !live ||
-                        runCatching { engine.manager.remove(d.gid) }
+                        runCatching { engine.manager.forceRemove(d.gid) }
                             .onFailure { failed++ }
                             .isSuccess
-                runCatching { engine.manager.clearResult(d.gid) }
+                if (!d.persisted) {
+                    if (runCatching { engine.manager.clearResult(d.gid) }.isFailure && live) {
+                        // forceRemove registers the result on the engine's next
+                        // event-loop tick — one short retry covers the transition.
+                        delay(300)
+                        runCatching { engine.manager.clearResult(d.gid) }
+                    }
+                }
                 engine.evictHistory(d.gid) // persisted records don't exist aria2-side
-                if (withFiles && stopped) deleteDownloadFiles(d)
+                // File wipe is only safe once the task is actually gone —
+                // deleting payload out from under a live aria2 write loses data.
+                if (withFiles && stopped) fileProblems += deleteDownloadFiles(d)
             }
             if (failed > 0) {
                 _events.emit(getApplication<Application>().getString(R.string.del_partial, failed))
+            }
+            if (fileProblems > 0) {
+                _events.emit(getApplication<Application>().getString(R.string.del_files_skipped, fileProblems))
             }
         }
         _selected.value = emptySet()
@@ -223,6 +275,8 @@ class DownloadViewModel(
     }
 
     companion object {
+        private const val MAX_TORRENT_BYTES = 10 * 1024 * 1024
+
         // Hand-rolled factory: the viewModelFactory DSL lives in lifecycle-viewmodel-ktx,
         // which this app doesn't depend on — the core Factory API is enough.
         val Factory: ViewModelProvider.Factory =

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  targetSdk 28+ blocks cleartext by default — including loopback (no exemption,
+  see issuetracker 397619883). The embedded engine's JSON-RPC is ws/http on
+  127.0.0.1, so permit cleartext ONLY for loopback hosts; everything else stays
+  blocked. Debug builds were exempt via debuggable, release builds were not —
+  this config is what makes the release APK actually reach the engine.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">::1</domain>
+    </domain-config>
+</network-security-config>

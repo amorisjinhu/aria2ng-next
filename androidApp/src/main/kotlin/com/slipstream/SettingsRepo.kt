@@ -3,18 +3,28 @@ package com.slipstream
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.slipstream.engine.EngineSpec
 import com.slipstream.engine.RpcTransport
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-private val Context.settingsStore by preferencesDataStore("settings")
+// Corruption (disk fault / power loss mid-write) must not crash-loop the app:
+// the handler swaps in empty prefs, ensureDefaults() re-seeds tokens, and the
+// .catch below covers any other IOException on the read path.
+private val Context.settingsStore by preferencesDataStore(
+    name = "settings",
+    corruptionHandler =
+        androidx.datastore.core.handlers
+            .ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 /**
  * Single source of truth for engine settings (DataStore). EngineSpec reads
@@ -37,25 +47,38 @@ class SettingsRepo(
         }
 
     val spec: Flow<EngineSpec> =
-        context.settingsStore.data.map { p ->
-            EngineSpec(
-                rpcPort = p[RPC_PORT] ?: BuildConfig.DEFAULT_RPC_PORT,
-                rpcToken = p[RPC_TOKEN] ?: "gbc",
-                rpcListenAll = p[LISTEN_ALL] ?: false,
-                rpcAllowOriginAll = p[ALLOW_ORIGIN_ALL] ?: false,
-                rpcTransport = p[RPC_TRANSPORT]?.let { runCatching { RpcTransport.valueOf(it) }.getOrNull() } ?: RpcTransport.WS,
-                dir = p[DIR] ?: EngineProcess.defaultDownloadDir(context),
-                checkCertificate = p[CHECK_CERT] ?: false,
-                saveSession = p[SAVE_SESSION] ?: true,
-                dlLimitKbps = p[DL_LIMIT] ?: 0,
-                ulLimitKbps = p[UL_LIMIT] ?: 0,
-                customOptions =
-                    p[CUSTOM_OPTIONS]
-                        ?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
-                        ?.mapValues { it.value.jsonPrimitive.content }
-                        ?: emptyMap(),
-            )
-        }
+        context.settingsStore.data
+            .catch { e ->
+                android.util.Log.e("SettingsRepo", "settings read failed — falling back to defaults", e)
+                emit(emptyPreferences())
+            }.map { p ->
+                EngineSpec(
+                    rpcPort = p[RPC_PORT] ?: BuildConfig.DEFAULT_RPC_PORT,
+                    // Never fall back to the publicly-known "gbc": on a corrupt
+                    // store the engine would otherwise restart on a default secret.
+                    rpcToken = p[RPC_TOKEN]?.takeIf { it.isNotBlank() } ?: randomToken(),
+                    rpcListenAll = p[LISTEN_ALL] ?: false,
+                    rpcAllowOriginAll = p[ALLOW_ORIGIN_ALL] ?: false,
+                    rpcTransport = p[RPC_TRANSPORT]?.let { runCatching { RpcTransport.valueOf(it) }.getOrNull() } ?: RpcTransport.WS,
+                    dir = p[DIR] ?: EngineProcess.defaultDownloadDir(context),
+                    // With a bundled CA the safe default is ON; without one, ON
+                    // would break every HTTPS download (no system store on Android).
+                    checkCertificate = p[CHECK_CERT] ?: (EngineProcess.caBundleFile(context) != null),
+                    saveSession = p[SAVE_SESSION] ?: true,
+                    dlLimitKbps = p[DL_LIMIT] ?: 0,
+                    ulLimitKbps = p[UL_LIMIT] ?: 0,
+                    // Whole parse chain guarded: a non-primitive value (nested
+                    // object/array) must not throw out of the DataStore flow and
+                    // kill the collector.
+                    customOptions =
+                        p[CUSTOM_OPTIONS]
+                            ?.let { raw ->
+                                runCatching {
+                                    Json.parseToJsonElement(raw).jsonObject.mapValues { it.value.jsonPrimitive.content }
+                                }.getOrNull()
+                            } ?: emptyMap(),
+                )
+            }
 
     /** Writes all fields in one edit → one emission → one engine restart. */
     suspend fun save(spec: EngineSpec) =
@@ -83,14 +106,18 @@ class SettingsRepo(
 
     /** Extension-API prefs — consumed by updateExtApi, never restarts the engine. */
     val extSpec: Flow<ExtApiSpec> =
-        context.settingsStore.data.map { p ->
-            ExtApiSpec(
-                enabled = p[EXT_ENABLED] ?: true,
-                port = p[EXT_PORT] ?: BuildConfig.DEFAULT_EXT_PORT,
-                token = p[EXT_TOKEN] ?: "",
-                listenAll = p[EXT_LISTEN_ALL] ?: false,
-            )
-        }
+        context.settingsStore.data
+            .catch { e ->
+                android.util.Log.e("SettingsRepo", "ext settings read failed — falling back to defaults", e)
+                emit(emptyPreferences())
+            }.map { p ->
+                ExtApiSpec(
+                    enabled = p[EXT_ENABLED] ?: true,
+                    port = p[EXT_PORT] ?: BuildConfig.DEFAULT_EXT_PORT,
+                    token = p[EXT_TOKEN] ?: "",
+                    listenAll = p[EXT_LISTEN_ALL] ?: false,
+                )
+            }
 
     suspend fun saveExt(spec: ExtApiSpec) =
         context.settingsStore.edit {
@@ -101,7 +128,10 @@ class SettingsRepo(
         }
 
     /** UI-only pref — theme changes must not restart the engine. */
-    val themeMode: Flow<Int> = context.settingsStore.data.map { it[THEME_MODE] ?: 0 }
+    val themeMode: Flow<Int> =
+        context.settingsStore.data
+            .catch { emit(emptyPreferences()) }
+            .map { it[THEME_MODE] ?: 0 }
 
     suspend fun setThemeMode(mode: Int) = context.settingsStore.edit { it[THEME_MODE] = mode }
 

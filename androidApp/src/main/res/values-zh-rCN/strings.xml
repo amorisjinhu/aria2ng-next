@@ -43,9 +43,13 @@
     <string name="open_failed">无法打开：此位置不支持分享</string>
     <string name="sha_failed">校验失败：文件不可读</string>
     <string name="del_partial">%1$d 项仍存活——已跳过文件删除</string>
+    <string name="del_files_skipped">已保留 %1$d 个文件——不存在或大小与记录不符（可能属于其他下载）</string>
     <string name="retry">重试</string>
     <string name="cd_retry">重试</string>
     <string name="retry_no_source">无法重试：未保存下载地址</string>
+    <string name="retry_remove_failed">无法重试：原任务移除失败</string>
+    <string name="torrent_unreadable">无法读取种子文件</string>
+    <string name="torrent_too_large">种子文件过大（超过 10 MB）</string>
     <string name="computing">计算中 %1$d%%…</string>
     <string name="copy">复制</string>
 
@@ -103,8 +107,11 @@
     <string name="download_dir">下载目录</string>
     <string name="use_public_download">使用公共下载目录</string>
     <string name="storage_warning">⚠ 需要"所有文件访问"权限</string>
+    <string name="storage_warning_legacy">⚠ 需要存储权限</string>
     <string name="check_cert">校验 TLS 证书</string>
-    <string name="check_cert_sub">需要 CA 证书包（ca-certificate 选项）— Android 无系统证书库</string>
+    <string name="check_cert_sub">内置 CA 包（assets/cacert.pem）自动生效；无 CA 包时开启会导致全部 HTTPS 下载失败</string>
+    <string name="save_failed">保存失败：%1$s</string>
+    <string name="settings_page_failed">无法打开系统设置页</string>
     <string name="save_session">保存会话</string>
     <string name="save_session_sub">重启后恢复下载</string>
     <string name="speed_limits">限速</string>
@@ -147,11 +154,18 @@
     <string name="engine_version_label">引擎</string>
     <string name="aria2_next_version">aria2-next %1$s</string>
     <string name="engine_stopped">已停止</string>
+    <string name="engine_failed_tap">⚠ %1$s — 点击查看引擎日志</string>
     <string name="license_label">许可</string>
     <string name="license_engine">GPLv2+（引擎）— 见 assets/NOTICE.txt</string>
 
     <!-- Engine event notifications -->
+    <string name="channel_engine">下载引擎</string>
     <string name="channel_events">下载事件</string>
+    <string name="notif_engine_running">aria2-next 运行中</string>
+    <string name="notif_engine_starting">引擎启动中…</string>
+    <string name="notif_engine_failed">引擎失败：%1$s</string>
+    <string name="notif_engine_stopped">引擎已停止</string>
+    <string name="notif_timeout">引擎被系统超时停止（dataSync 时限）。打开应用即可恢复——未完成任务会从会话还原。</string>
     <string name="ev_started">已开始</string>
     <string name="ev_completed">已完成</string>
     <string name="ev_error">出错</string>

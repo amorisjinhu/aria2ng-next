@@ -1,3 +1,5 @@
+@file:OptIn(kotlin.concurrent.atomics.ExperimentalAtomicApi::class)
+
 package com.slipstream.rpc
 
 import com.slipstream.model.Download
@@ -43,12 +45,18 @@ class DownloadManager(
     private var notifyJob: Job? = null
     private val refreshMutex = Mutex()
 
+    // Bumped by stop(): an EXTERNAL caller's refresh (VM add/remove → refresh)
+    // runs on its own job, so ensureActive alone can't stop it writing a stale
+    // snapshot over the cleared flows — the generation check can.
+    private val generation = kotlin.concurrent.atomics.AtomicLong(0)
+
     // Every aria2.on* event, forwarded untouched for user-facing alerts.
     // Kept separate from the refresh trigger, which conflates bursts and
     // would drop events needed by notification subscribers.
     private val _events = MutableSharedFlow<JsonObject>(extraBufferCapacity = 64)
     val events = _events.asSharedFlow()
 
+    @Synchronized
     fun start() {
         if (pollJob?.isActive == true) return
         pollJob =
@@ -79,7 +87,9 @@ class DownloadManager(
             }
     }
 
+    @Synchronized
     fun stop() {
+        generation.addAndFetch(1)
         pollJob?.cancel()
         pollJob = null
         eventsJob?.cancel()
@@ -92,6 +102,7 @@ class DownloadManager(
 
     suspend fun refresh() {
         if (!client.isConnected) return
+        val gen = generation.load()
         // Serialized: a slower refresh can't overwrite a newer snapshot
         refreshMutex.withLock {
             try {
@@ -100,11 +111,14 @@ class DownloadManager(
                 // stop() may have cancelled us during the RPCs and cleared the
                 // flows — don't write a stale snapshot back over that clear.
                 coroutineContext.ensureActive()
+                if (generation.load() != gen) return@withLock
                 // A just-removed gid can briefly appear in BOTH a live list
                 // and tellStopped during aria2's transition — the UI keys
                 // LazyColumn items by gid, so dupes are a hard crash. First
                 // occurrence wins → live state beats the stale stopped copy.
-                _downloads.value = all.map { Download.fromJson(it) }.distinctBy { it.gid }
+                // One malformed entry must not destroy the whole snapshot.
+                _downloads.value =
+                    all.mapNotNull { runCatching { Download.fromJson(it) }.getOrNull() }.distinctBy { it.gid }
                 _globalStat.value = stat
             } catch (e: Exception) {
                 // ensureActive rethrows CancellationException only when OUR job
@@ -143,9 +157,10 @@ class DownloadManager(
         refresh()
     }
 
-    suspend fun addTorrent(torrentBase64: String) {
-        client.addTorrent(torrentBase64)
+    suspend fun addTorrent(torrentBase64: String): String {
+        val gid = client.addTorrent(torrentBase64)
         refresh()
+        return gid
     }
 
     suspend fun pauseAll() {
@@ -170,6 +185,12 @@ class DownloadManager(
 
     suspend fun remove(gid: String) {
         client.remove(gid)
+        refresh()
+    }
+
+    /** Like [remove] but immediate — no async stop/flush window before clearResult. */
+    suspend fun forceRemove(gid: String) {
+        client.forceRemove(gid)
         refresh()
     }
 

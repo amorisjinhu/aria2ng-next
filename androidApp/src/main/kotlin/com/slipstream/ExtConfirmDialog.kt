@@ -8,11 +8,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 
 /**
  * Extension-API submissions: same confirm-first contract as VIEW/SEND
@@ -26,7 +24,6 @@ internal fun ExtConfirmDialog(
 ) {
     val p = pending.firstOrNull() ?: return
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = { engine.dismissExtAdd(p) },
         title = { Text(stringResource(R.string.ext_req_title)) },
@@ -50,15 +47,16 @@ internal fun ExtConfirmDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    scope.launch {
-                        engine.confirmExtAdd(p).onFailure { e ->
-                            Toast
-                                .makeText(
-                                    ctx,
-                                    ctx.getString(R.string.rpc_failed, e.message ?: e.toString()),
-                                    Toast.LENGTH_LONG,
-                                ).show()
-                        }
+                    // Engine scope, NOT rememberCoroutineScope: confirming the
+                    // last item drains the queue → this dialog leaves composition
+                    // → a composition-bound scope would cancel the addUri mid-RPC.
+                    engine.confirmExtAddDetached(p) { e ->
+                        Toast
+                            .makeText(
+                                ctx,
+                                ctx.getString(R.string.rpc_failed, e.message ?: e.toString()),
+                                Toast.LENGTH_LONG,
+                            ).show()
                     }
                 },
             ) { Text(stringResource(R.string.download)) }

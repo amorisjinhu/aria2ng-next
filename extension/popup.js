@@ -20,13 +20,25 @@ async function api(path, method = "GET") {
 }
 
 async function load() {
+  // setInterval can fire while a slow fetch is still in flight — overlapping
+  // loads would interleave DOM writes and duplicate work.
+  if (load.inFlight) return;
+  load.inFlight = true;
+  try {
+    await loadInner();
+  } finally {
+    load.inFlight = false;
+  }
+}
+
+async function loadInner() {
   $("err").textContent = "";
   let j;
   try {
     j = await api("/tasks");
   } catch (e) {
     $("stat").textContent = "";
-    $("tasks").innerHTML = "";
+    $("tasks").replaceChildren();
     $("err").textContent =
       e.message === "unauthorized"
         ? "Wrong token — check extension options"
@@ -43,22 +55,41 @@ async function load() {
     `↓ ${fmt(s.downloadSpeed)}/s  ↑ ${fmt(s.uploadSpeed)}/s  ·  ${s.numActive ?? 0} active / ${s.numWaiting ?? 0} waiting`;
 
   const tasks = j.tasks || [];
-  $("tasks").innerHTML = tasks.length
-    ? ""
-    : '<div class="empty">No tasks</div>';
+  const list = $("tasks");
+  list.replaceChildren();
+  if (!tasks.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No tasks";
+    list.appendChild(empty);
+  }
+  // Everything server-supplied goes through textContent, never innerHTML:
+  // /tasks crosses a trust boundary (plain HTTP + listenAll → LAN MITM), and
+  // this page holds cookies/downloads/storage privileges — an injected
+  // <script> in a status/name field would be extension-context XSS.
   for (const t of tasks) {
     const pct = t.totalLength > 0 ? Math.min(100, (100 * t.completedLength) / t.totalLength) : 0;
     const div = document.createElement("div");
     div.className = "task";
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = t.name || t.gid;
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const info = document.createElement("span");
+    info.textContent =
+      `${t.status} · ${fmt(t.completedLength)}/${fmt(t.totalLength)}` +
+      (t.downloadSpeed ? ` · ↓${fmt(t.downloadSpeed)}/s` : "");
+    const ops = document.createElement("span");
+    ops.className = "ops";
+    meta.append(info, ops);
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const fill = document.createElement("i");
+    fill.style.width = `${pct}%`; // pct is a locally computed number — safe
+    bar.appendChild(fill);
+    div.append(name, meta, bar);
     const live = ["active", "waiting", "paused"].includes(t.status);
-    div.innerHTML =
-      `<div class="name"></div>` +
-      `<div class="meta"><span>${t.status} · ${fmt(t.completedLength)}/${fmt(t.totalLength)}` +
-      (t.downloadSpeed ? ` · ↓${fmt(t.downloadSpeed)}/s` : "") +
-      `</span><span class="ops"></span></div>` +
-      `<div class="bar"><i style="width:${pct}%"></i></div>`;
-    div.querySelector(".name").textContent = t.name || t.gid;
-    const ops = div.querySelector(".ops");
     if (live) {
       const b = document.createElement("button");
       b.textContent = t.status === "paused" ? "▶" : "⏸";
@@ -70,7 +101,7 @@ async function load() {
       };
       ops.appendChild(b);
     }
-    $("tasks").appendChild(div);
+    list.appendChild(div);
   }
 }
 

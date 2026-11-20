@@ -2,15 +2,14 @@ package com.slipstream
 
 import com.slipstream.model.Download
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.util.concurrent.Executors
 
 /**
  * Persists finished download records (complete/error) to disk.
@@ -21,6 +20,12 @@ import java.io.File
  * records survive restarts, engine toggles and reboots. Entries are
  * marked persisted=true: their gids are dead engine-side, so only
  * record/file/retry ops make sense on them.
+ *
+ * All mutations run on ONE thread in submission order: load lands before
+ * any merge, and an evict can't be overtaken by a queued merge holding a
+ * stale snapshot (which would resurrect the deleted record). Tombstones
+ * additionally filter gids out of later merges — a snapshot captured
+ * before the evict may still carry the gid.
  */
 class HistoryStore(
     filesDir: File,
@@ -28,10 +33,19 @@ class HistoryStore(
 ) {
     private val file = File(filesDir, "history.json")
     private val json = Json { ignoreUnknownKeys = true }
-    private val mutex = Mutex()
+    private val dispatcher =
+        Executors.newSingleThreadExecutor { r -> Thread(r, "history-store") }.asCoroutineDispatcher()
+    private val tombstones = LinkedHashSet<String>()
 
-    private val _history = MutableStateFlow(load())
+    private val _history = MutableStateFlow<List<Download>>(emptyList())
     val history: StateFlow<List<Download>> = _history.asStateFlow()
+
+    init {
+        // Off the main thread: construction happens on the caller's thread
+        // (MainActivity/EngineService onCreate) — disk I/O there is a
+        // StrictMode violation and jank on a full 300-entry file.
+        scope.launch(dispatcher) { _history.value = load() }
+    }
 
     private fun load(): List<Download> =
         runCatching {
@@ -48,29 +62,46 @@ class HistoryStore(
                 it.status == Download.Status.COMPLETE || it.status == Download.Status.ERROR
             }
         if (stopped.isEmpty()) return
-        scope.launch(Dispatchers.IO) {
-            mutex.withLock {
-                val merged =
-                    (stopped + _history.value)
-                        .distinctBy { it.gid }
-                        .take(MAX_ENTRIES)
-                        .map { it.copy(persisted = true) }
-                if (merged.map { it.gid } != _history.value.map { it.gid }) {
-                    _history.value = merged
-                    runCatching { file.writeText(json.encodeToString(merged)) }
-                }
+        scope.launch(dispatcher) {
+            val merged =
+                (stopped.filter { it.gid !in tombstones } + _history.value)
+                    .distinctBy { it.gid }
+                    .take(MAX_ENTRIES)
+                    .map { it.copy(persisted = true) }
+            if (merged.map { it.gid } != _history.value.map { it.gid }) {
+                _history.value = merged
+                persist(merged)
             }
         }
     }
 
     fun evict(gid: String) {
-        scope.launch(Dispatchers.IO) {
-            mutex.withLock {
-                val next = _history.value.filterNot { it.gid == gid }
-                if (next.size != _history.value.size) {
-                    _history.value = next
-                    runCatching { file.writeText(json.encodeToString(next)) }
-                }
+        scope.launch(dispatcher) {
+            tombstones.add(gid)
+            while (tombstones.size > MAX_ENTRIES) tombstones.remove(tombstones.first())
+            val next = _history.value.filterNot { it.gid == gid }
+            if (next.size != _history.value.size) {
+                _history.value = next
+                persist(next)
+            }
+        }
+    }
+
+    /**
+     * temp+rename: a process kill mid-write can never truncate the live file.
+     * (writeText in place used to leave half a JSON doc → load silently
+     * returned empty → the whole history vanished without a trace.)
+     */
+    private fun persist(entries: List<Download>) {
+        runCatching {
+            val text = json.encodeToString(entries)
+            val tmp = File(file.parentFile, "history.json.tmp")
+            tmp.writeText(text)
+            if (!tmp.renameTo(file)) {
+                // Same-dir rename is atomic on Linux; this fallback only hits
+                // exotic filesystems where rename-over-existing fails.
+                file.writeText(text)
+                tmp.delete()
             }
         }
     }

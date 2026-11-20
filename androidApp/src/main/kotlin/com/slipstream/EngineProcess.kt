@@ -9,11 +9,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -60,8 +62,38 @@ class EngineProcess private constructor(
     val historyStore: HistoryStore = HistoryStore(context.filesDir, scope)
     val history: StateFlow<List<com.slipstream.model.Download>> get() = historyStore.history
 
+    /**
+     * Bundled Mozilla CA bundle (assets/cacert.pem), extracted once for aria2.
+     * Null when the asset is absent — check-certificate then stays off by
+     * default (flipping it on without a bundle breaks every HTTPS download).
+     */
+    val caBundle: File? =
+        runCatching {
+            val out = File(context.filesDir, "cacert.pem")
+            context.assets.open("cacert.pem").use { input ->
+                if (!out.isFile || out.length() != input.available().toLong()) {
+                    out.outputStream().use { input.copyTo(it) }
+                }
+            }
+            out
+        }.getOrNull()
+
+    private val logChannel = Channel<String>(Channel.UNLIMITED)
+
     init {
         scope.launch { manager.downloads.collect { snapshot -> historyStore.merge(snapshot) } }
+        // Batch log lines: per-line StateFlow.update is a CAS+copy storm under
+        // aria2's verbose output — one update per 100ms window instead.
+        scope.launch {
+            val batch = mutableListOf<String>()
+            while (isActive) {
+                batch.add(logChannel.receive())
+                delay(100)
+                while (true) batch.add(logChannel.tryReceive().getOrNull() ?: break)
+                _log.update { (it + batch).takeLast(200) }
+                batch.clear()
+            }
+        }
     }
 
     fun evictHistory(gid: String) = historyStore.evict(gid)
@@ -82,6 +114,9 @@ class EngineProcess private constructor(
     fun updateExtApi(spec: ExtApiSpec) {
         if (spec == extSpec) return
         extSpec = spec
+        // Stale confirmations must not outlive the listener they arrived on —
+        // a browser that already fell back would double-download on confirm.
+        drainExtPending("ext api reconfigured")
         extServer?.stop()
         extServer =
             if (spec.enabled && spec.token.isNotBlank()) {
@@ -102,6 +137,16 @@ class EngineProcess private constructor(
 
     fun enqueueExtAdd(p: PendingAdd) = _extPending.update { it + p }
 
+    /** Atomic drain: claim + verdict for every unclaimed entry, then clear. */
+    private fun drainExtPending(reason: String) {
+        val drained = _extPending.getAndUpdate { emptyList() }
+        drained.forEach { p ->
+            if (p.claimed.compareAndSet(false, true)) {
+                p.verdict.complete(AddVerdict.Failed(reason))
+            }
+        }
+    }
+
     fun dismissExtAdd(p: PendingAdd) {
         // Atomic claim: the dialog and the notification action can race —
         // whoever wins the CAS owns the verdict.
@@ -110,12 +155,14 @@ class EngineProcess private constructor(
         p.verdict.complete(AddVerdict.Cancelled)
     }
 
+    private val alreadyHandled = IllegalStateException("already handled")
+
     /** Confirmed by the user → real addUri. Returns the gid so UI can report failure. */
     suspend fun confirmExtAdd(p: PendingAdd): Result<String> {
         // Claim BEFORE the RPC round-trip — a second caller (double-tap or the
         // notification button) must not issue a duplicate addUri.
         if (!p.claimed.compareAndSet(false, true)) {
-            return Result.failure(IllegalStateException("already handled"))
+            return Result.failure(alreadyHandled)
         }
         _extPending.update { it - p }
         val r = runCatching { manager.add(listOf(p.url), p.options) }
@@ -123,6 +170,24 @@ class EngineProcess private constructor(
             r.fold({ AddVerdict.Added(it) }, { AddVerdict.Failed(it.message ?: "add failed") }),
         )
         return r
+    }
+
+    /**
+     * UI entry point: the confirm runs on the ENGINE scope, never the dialog's
+     * rememberCoroutineScope — confirming the last queued item drains the queue,
+     * the dialog leaves composition, and a composition-bound scope would cancel
+     * the in-flight addUri mid-RPC (verdict Failed → browser resumes → double add).
+     */
+    fun confirmExtAddDetached(
+        p: PendingAdd,
+        onError: (Throwable) -> Unit,
+    ) {
+        scope.launch {
+            confirmExtAdd(p).onFailure { e ->
+                if (e === alreadyHandled) return@onFailure // lost the CAS race — silent
+                onError(e)
+            }
+        }
     }
 
     /**
@@ -182,6 +247,7 @@ class EngineProcess private constructor(
                             android.app.PendingIntent.FLAG_UPDATE_CURRENT,
                     ),
                 ).setAutoCancel(true)
+                .setTimeoutAfter(30_000)
                 .build()
         return runCatching {
             androidx.core.app.NotificationManagerCompat
@@ -228,7 +294,7 @@ class EngineProcess private constructor(
     }
 
     private fun appendLog(line: String) {
-        _log.update { (it + line).takeLast(200) }
+        logChannel.trySend(line)
     }
 
     @Synchronized
@@ -240,9 +306,10 @@ class EngineProcess private constructor(
     }
 
     private suspend fun runStart() {
-        // Bind this attempt to the client/spec that existed when start() ran —
-        // updateSpec may swap `client` mid-flight; we must not chase it.
-        val c = client
+        // Bind this attempt to ONE (spec, client) generation, atomically —
+        // updateSpec swaps both under this lock; a torn pair would spawn with
+        // new args but connect with the old endpoint/token.
+        val (s, c) = synchronized(this) { spec to client }
         var p: Process? = null
         try {
             // The predecessor may still be holding the RPC port (aria2 saves
@@ -255,19 +322,22 @@ class EngineProcess private constructor(
             check(exec.exists()) { "engine binary missing: ${exec.absolutePath}" }
 
             val session = File(context.filesDir, "session")
-            if (spec.saveSession && !session.exists()) session.createNewFile()
+            if (s.saveSession && !session.exists()) session.createNewFile()
 
-            val isPublicDir =
-                spec.dir.startsWith("/storage/emulated/0/") &&
-                    !spec.dir.contains("/Android/data/")
-            if (isPublicDir &&
+            if (isPublicStoragePath(s.dir) &&
                 android.os.Build.VERSION.SDK_INT >= 30 &&
                 !android.os.Environment.isExternalStorageManager()
             ) {
-                appendLog("!! warning: '${spec.dir}' is shared storage — grant 'All files access' in settings or downloads will fail")
+                appendLog("!! warning: '${s.dir}' is shared storage — grant 'All files access' in settings or downloads will fail")
             }
 
-            val args = mutableListOf(exec.absolutePath) + spec.args(session.absolutePath)
+            val args =
+                mutableListOf(exec.absolutePath) +
+                    s.args(
+                        session.absolutePath,
+                        caCertificatePath = caBundle?.absolutePath,
+                        parentPid = android.os.Process.myPid(),
+                    )
             Log.i(TAG, "exec: ${args.joinToString(" ") { a -> if (a.startsWith("--rpc-secret=")) "--rpc-secret=***" else a }}")
 
             val spawned =
@@ -297,15 +367,18 @@ class EngineProcess private constructor(
                     }
                 }
 
-            // Wait for RPC to come up, then verify via getVersion
+            // Wait for RPC to come up, then verify via getVersion.
+            // Overall budget: 20 × (10s RPC timeout + 300ms) could strand the
+            // UI in Starting for ~200s — cap the whole attempt at 60s.
             var attempts = 0
-            while (attempts++ < 20) {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(START_BUDGET_S)
+            while (attempts++ < 20 && System.nanoTime() < deadline) {
                 try {
                     c.connect()
                     val v = c.getVersion()
                     coroutineContext.ensureActive()
                     _engineVersion.value = v.version
-                    appendLog(">>> aria2-next ${v.version} ready on ${spec.rpcEndpoint}")
+                    appendLog(">>> aria2-next ${v.version} ready on ${s.rpcEndpoint}")
                     manager.start()
                     watchProcess(spawned)
                     return
@@ -313,7 +386,11 @@ class EngineProcess private constructor(
                     // ensureActive distinguishes real cancellation from the
                     // TimeoutCancellationException a hung RPC round-trip raises
                     coroutineContext.ensureActive()
-                    if (!spawned.isAlive) throw e
+                    // ensureActive passed → e is not OUR cancellation. A dead
+                    // process must surface as a business failure: rethrowing the
+                    // inner timeout CE would land in the cancellation branch and
+                    // strand _state at Running forever with no watchProcess.
+                    if (!spawned.isAlive) throw IllegalStateException("engine exited during RPC wait", e)
                     delay(300)
                 }
             }
@@ -393,28 +470,25 @@ class EngineProcess private constructor(
         _engineVersion.value = null
         // Ext-API waiters can't be satisfied without an engine — fail them so
         // an ack:"final" caller falls back to the browser's own download.
-        _extPending.value.forEach { p ->
-            if (p.claimed.compareAndSet(false, true)) {
-                p.verdict.complete(AddVerdict.Failed("engine stopped"))
-            }
-        }
-        _extPending.value = emptyList()
+        drainExtPending("engine stopped")
         _state.value = State.Stopped
-    }
-
-    @Synchronized
-    fun restart() {
-        stop()
-        start()
     }
 
     companion object {
         private const val TAG = "EngineProcess"
+        private const val START_BUDGET_S = 60L
+        const val MAX_EXT_PENDING = 32
 
-        /** App-private external dir: no storage permission needed, still user-visible in Files. */
+        /**
+         * App-private external dir: no storage permission needed. NOT visible
+         * via MTP/DocumentsUI on Android 11+ — Android/data is hidden there.
+         */
         fun defaultDownloadDir(context: Context): String =
             context.getExternalFilesDir("downloads")?.absolutePath
                 ?: File(context.filesDir, "downloads").absolutePath
+
+        /** Extracted CA bundle location — the default for check-certificate. */
+        fun caBundleFile(context: Context): File? = File(context.filesDir, "cacert.pem").takeIf { it.isFile }
 
         @Volatile
         private var instance: EngineProcess? = null

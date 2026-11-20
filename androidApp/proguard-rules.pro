@@ -8,7 +8,7 @@
 -keepattributes *Annotation*, InnerClasses
 -dontnote kotlinx.serialization.AnnotationsKt
 -keepclassmembers class kotlinx.serialization.json.** {
-    *** CompanionObject;
+    *** Companion;
 }
 -keepclasseswithmembers class com.slipstream.** {
     kotlinx.serialization.KSerializer serializer(...);

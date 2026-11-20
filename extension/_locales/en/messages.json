@@ -2,5 +2,6 @@
   "menuTitle": { "message": "Download with aria2ng-next" },
   "sentConfirm": { "message": "Sent — confirm in the app" },
   "sendFailed": { "message": "Send failed" },
+  "noToken": { "message": "Set the app token in the extension options first" },
   "fallbackNote": { "message": "App unreachable — browser kept the download" }
 }

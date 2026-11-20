@@ -8,17 +8,28 @@ kotlin {
     jvmToolchain(21)
     androidLibrary {
         namespace = "com.slipstream.shared"
-        compileSdk = 37
-        minSdk = 24
+        compileSdk =
+            libs.versions.compileSdk
+                .get()
+                .toInt()
+        minSdk =
+            libs.versions.minSdk
+                .get()
+                .toInt()
     }
 
     sourceSets {
         commonMain.dependencies {
-            implementation(libs.ktor.client.core)
-            implementation(libs.ktor.client.websockets)
-            implementation(libs.kotlinx.serialization.json)
-            implementation(libs.kotlinx.coroutines.core)
+            // api, not implementation: these types appear in the module's public
+            // surface (JsonObject, StateFlow, suspend APIs) — consumers must see them.
+            api(libs.ktor.client.core)
+            api(libs.ktor.client.websockets)
+            api(libs.kotlinx.serialization.json)
+            api(libs.kotlinx.coroutines.core)
         }
+        // Pure-logic unit tests live in androidApp/src/test: the AGP KMP library
+        // plugin wires no host-test execution task here, so commonTest would
+        // compile but never run. androidApp's test classpath includes shared.
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
         }

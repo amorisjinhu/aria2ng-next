@@ -15,18 +15,23 @@ import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -96,60 +101,79 @@ class Aria2Client(
             // notices !isConnected and calls connect() again with backoff
         }
 
-    val events = MutableSharedFlow<JsonObject>(extraBufferCapacity = 64)
+    // Notifications are best-effort: DROP_OLDEST + tryEmit means a slow or
+    // absent subscriber can NEVER backpressure the reader into stalling the
+    // response path (responses complete pending waiters, not this flow).
+    private val _events =
+        MutableSharedFlow<JsonObject>(
+            extraBufferCapacity = 64,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+    val events = _events.asSharedFlow()
+
+    private val connectMutex = Mutex()
+
+    // HTTP has no persistent session — track the last round-trip's health so
+    // isConnected reflects engine death and the poll loop's reconnect branch
+    // is reachable (it was dead code when this stayed true forever).
+    @Volatile
+    private var httpHealthy = true
 
     private val _connected = MutableStateFlow(false)
     val connected = _connected.asStateFlow()
     val isConnected: Boolean
         get() =
             if (useHttp) {
-                _connected.value && !closed
+                _connected.value && !closed && httpHealthy
             } else {
                 session?.isActive == true
             }
 
     suspend fun connect() {
-        if (closed) { // a previous close() destroyed the engine — recreate
-            http = HttpClient { install(WebSockets) }
-            closed = false
-        }
-        if (useHttp) {
-            // Nothing persistent to establish — per-request failure surfaces in call()
-            _connected.value = true
-            return
-        }
-        readerJob?.cancel()
-        session?.close(CloseReason(CloseReason.Codes.NORMAL, "reconnect"))
-        val s = http.webSocketSession(url)
-        session = s
-        _connected.value = true
-        readerJob =
-            scope.launch(handler) {
-                try {
-                    for (frame in s.incoming) {
-                        if (frame !is Frame.Text) continue
-                        val obj =
-                            runCatching { json.parseToJsonElement(frame.readText()).jsonObject }
-                                .getOrNull() ?: continue
-
-                        if (obj.containsKey("method")) {
-                            events.emit(obj)
-                        } else {
-                            val respId = obj["id"]?.jsonPrimitive?.content?.toLongOrNull()
-                            val waiter = respId?.let { pending.remove(it) }
-                            // unmatched response (arrived after our timeout) — drop
-                            waiter?.deferred?.complete(obj)
-                        }
-                    }
-                } finally {
-                    // only tear down state we own — a newer connect() may have swapped session
-                    if (session === s) {
-                        session = null
-                        _connected.value = false
-                    }
-                    failPending(s, IllegalStateException("Disconnected"))
-                }
+        connectMutex.withLock {
+            if (closed) { // a previous close() destroyed the engine — recreate
+                http = HttpClient { install(WebSockets) }
+                closed = false
             }
+            if (useHttp) {
+                // Nothing persistent to establish — per-request failure surfaces in call()
+                httpHealthy = true
+                _connected.value = true
+                return@withLock
+            }
+            readerJob?.cancel()
+            session?.close(CloseReason(CloseReason.Codes.NORMAL, "reconnect"))
+            val s = http.webSocketSession(url)
+            session = s
+            _connected.value = true
+            readerJob =
+                scope.launch(handler) {
+                    try {
+                        for (frame in s.incoming) {
+                            if (frame !is Frame.Text) continue
+                            val obj =
+                                runCatching { json.parseToJsonElement(frame.readText()).jsonObject }
+                                    .getOrNull() ?: continue
+
+                            if (obj.containsKey("method")) {
+                                _events.tryEmit(obj)
+                            } else {
+                                val respId = obj["id"]?.jsonPrimitive?.content?.toLongOrNull()
+                                val waiter = respId?.let { pending.remove(it) }
+                                // unmatched response (arrived after our timeout) — drop
+                                waiter?.deferred?.complete(obj)
+                            }
+                        }
+                    } finally {
+                        // only tear down state we own — a newer connect() may have swapped session
+                        if (session === s) {
+                            session = null
+                            _connected.value = false
+                        }
+                        failPending(s, IllegalStateException("Disconnected"))
+                    }
+                }
+        }
     }
 
     suspend fun call(
@@ -179,7 +203,9 @@ class Aria2Client(
                 wsRoundTrip(request, id)
             }
 
-        val error = response["error"]?.jsonObject
+        // "error": null is legal JSON-RPC — as? instead of .jsonObject, which
+        // throws on JsonNull and would turn a success into a parse crash.
+        val error = response["error"] as? JsonObject
         if (error != null) {
             throw Aria2RpcException(
                 error["code"]?.jsonPrimitive?.int ?: -1,
@@ -213,13 +239,21 @@ class Aria2Client(
     }
 
     private suspend fun httpRoundTrip(request: JsonObject): JsonObject {
-        val response =
-            withTimeout(10_000) {
-                http.post(url) {
-                    setBody(TextContent(request.toString(), ContentType.Application.Json))
+        try {
+            val response =
+                withTimeout(10_000) {
+                    http.post(url) {
+                        setBody(TextContent(request.toString(), ContentType.Application.Json))
+                    }
                 }
-            }
-        return json.parseToJsonElement(response.bodyAsText()).jsonObject
+            httpHealthy = true
+            return json.parseToJsonElement(response.bodyAsText()).jsonObject
+        } catch (e: CancellationException) {
+            throw e // our caller was cancelled — not an engine-health signal
+        } catch (e: Exception) {
+            httpHealthy = false
+            throw e
+        }
     }
 
     suspend fun getVersion(): Version {

@@ -43,9 +43,13 @@
     <string name="open_failed">Can\'t open: this location isn\'t shareable</string>
     <string name="sha_failed">Verification failed: file unreadable</string>
     <string name="del_partial">%1$d item(s) still active — files kept</string>
+    <string name="del_files_skipped">%1$d file(s) kept — missing or size differs from the record (may belong to another download)</string>
     <string name="retry">Retry</string>
     <string name="cd_retry">Retry</string>
     <string name="retry_no_source">Can\'t retry: no source URI stored</string>
+    <string name="retry_remove_failed">Can\'t retry: removing the original task failed</string>
+    <string name="torrent_unreadable">Can\'t read the torrent file</string>
+    <string name="torrent_too_large">Torrent file too large (over 10 MB)</string>
     <string name="computing">computing %1$d%%…</string>
     <string name="copy">Copy</string>
 
@@ -103,8 +107,11 @@
     <string name="download_dir">Download directory</string>
     <string name="use_public_download">Use public Download folder</string>
     <string name="storage_warning">⚠ needs All files access</string>
+    <string name="storage_warning_legacy">⚠ needs storage permission</string>
     <string name="check_cert">Verify TLS certificates</string>
-    <string name="check_cert_sub">Needs a CA bundle (ca-certificate option) — no system store on Android</string>
+    <string name="check_cert_sub">A bundled CA (assets/cacert.pem) is used automatically; without one, verification fails every HTTPS download</string>
+    <string name="save_failed">Save failed: %1$s</string>
+    <string name="settings_page_failed">Can\'t open the system settings page</string>
     <string name="save_session">Save session</string>
     <string name="save_session_sub">Restore downloads across restarts</string>
     <string name="speed_limits">Speed limits</string>
@@ -147,11 +154,18 @@
     <string name="engine_version_label">Engine</string>
     <string name="aria2_next_version">aria2-next %1$s</string>
     <string name="engine_stopped">stopped</string>
+    <string name="engine_failed_tap">⚠ %1$s — tap for the engine log</string>
     <string name="license_label">License</string>
     <string name="license_engine">GPLv2+ (engine) — see assets/NOTICE.txt</string>
 
     <!-- Engine event notifications -->
+    <string name="channel_engine">Download engine</string>
     <string name="channel_events">Download events</string>
+    <string name="notif_engine_running">aria2-next is running</string>
+    <string name="notif_engine_starting">Engine starting…</string>
+    <string name="notif_engine_failed">Engine failed: %1$s</string>
+    <string name="notif_engine_stopped">Engine stopped</string>
+    <string name="notif_timeout">Engine stopped by the system (dataSync time limit). Open the app to resume — unfinished tasks are restored from the session.</string>
     <string name="ev_started">started</string>
     <string name="ev_completed">completed</string>
     <string name="ev_error">failed</string>

@@ -4,6 +4,7 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -55,6 +57,7 @@ internal fun DownloadScreen(
     externalAdd: List<String>?,
     onExternalAddHandled: () -> Unit,
     onOpenDrawer: () -> Unit,
+    onOpenLog: () -> Unit,
 ) {
     val state by engine.state.collectAsState()
     val downloads by vm.downloads.collectAsState()
@@ -155,6 +158,15 @@ internal fun DownloadScreen(
                                         )
                                     is EngineProcess.State.Starting ->
                                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    is EngineProcess.State.Failed ->
+                                        // Red, not the Stopped gray — a failed engine must
+                                        // be visually distinct, with the reason below.
+                                        Icon(
+                                            Icons.Filled.Circle,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(12.dp),
+                                        )
                                     else ->
                                         Icon(
                                             Icons.Outlined.Circle,
@@ -164,6 +176,20 @@ internal fun DownloadScreen(
                                         )
                                 }
                             }
+                        }
+                        (state as? EngineProcess.State.Failed)?.let { f ->
+                            Text(
+                                stringResource(R.string.engine_failed_tap, f.reason),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable(onClick = onOpenLog)
+                                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                            )
                         }
                         SpeedGraph(speedHistory, Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 16.dp))
                     }

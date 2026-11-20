@@ -4,8 +4,17 @@ import android.content.Intent
 import android.widget.Toast
 import com.slipstream.model.Download
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.coroutines.coroutineContext
+
+/**
+ * Shared-storage path on ANY volume (primary emulated or SD secondary) —
+ * app-private dirs live under Android/data (excluded) or /data (not /storage).
+ * Hardcoding /storage/emulated/0 missed SD-card public dirs entirely.
+ */
+internal fun isPublicStoragePath(path: String): Boolean = path.startsWith("/storage/") && !path.contains("/Android/data/")
 
 /** Open a downloaded file via FileProvider — file:// URIs are banned on API 24+. */
 internal fun openLocalFile(
@@ -58,6 +67,9 @@ internal suspend fun sha256Hex(
         f.inputStream().buffered().use { ins ->
             val buf = ByteArray(1 shl 20)
             while (true) {
+                // Closing the dialog cancels us — stop hashing a multi-GB file
+                // nobody is waiting for anymore.
+                coroutineContext.ensureActive()
                 val n = ins.read(buf)
                 if (n < 0) break
                 digest.update(buf, 0, n)
@@ -71,9 +83,16 @@ internal suspend fun sha256Hex(
 /**
  * Wipe a download's payload: every listed file + its .aria2 control file,
  * then walk up empty dirs (BT layout) without ever leaving the download dir.
+ * Returns the number of files kept/failed (0 = everything wiped).
+ *
+ * Persisted records carry completion-time path snapshots: if the user deleted
+ * the old file and ANOTHER download since produced a file with the same name,
+ * blind deletion destroys unrelated data. Only wipe a persisted file whose
+ * size still matches the record; unverifiable entries are kept and reported.
  */
-internal suspend fun deleteDownloadFiles(d: Download) =
+internal suspend fun deleteDownloadFiles(d: Download): Int =
     withContext(Dispatchers.IO) {
+        var problems = 0
         val paths =
             d.files.map { it.path }.filter { it.isNotEmpty() }.ifEmpty {
                 listOf(File(d.dir, d.name).path)
@@ -81,7 +100,14 @@ internal suspend fun deleteDownloadFiles(d: Download) =
         paths.forEach { p ->
             runCatching {
                 val f = File(p)
-                f.delete()
+                if (d.persisted) {
+                    val recorded = d.files.firstOrNull { it.path == p }
+                    if (recorded == null || recorded.length <= 0 || !f.isFile || f.length() != recorded.length) {
+                        problems++
+                        return@runCatching
+                    }
+                }
+                if (f.exists() && !f.delete()) problems++
                 File("$p.aria2").delete()
                 if (d.dir.isNotEmpty()) {
                     // Canonical paths + trailing separator: "/a/bc" must NOT
@@ -98,6 +124,7 @@ internal suspend fun deleteDownloadFiles(d: Download) =
                         parent = parent.parentFile
                     }
                 }
-            }
+            }.onFailure { problems++ }
         }
+        problems
     }

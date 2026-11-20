@@ -39,9 +39,11 @@ internal fun AddDownloadDialog(
     onAdd: (List<String>, Map<String, String>) -> Unit,
     onPickTorrent: () -> Unit,
 ) {
-    var text by remember { mutableStateOf(initialText) }
-    var options by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var showOptions by remember { mutableStateOf(false) }
+    // Keyed on initialText: a new share/intent prefill must replace the draft,
+    // not be swallowed by a remembered stale one.
+    var text by remember(initialText) { mutableStateOf(initialText) }
+    var options by remember(initialText) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var showOptions by remember(initialText) { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
 
     AlertDialog(

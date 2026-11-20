@@ -143,9 +143,9 @@ class MainActivity : ComponentActivity() {
                                         vm = vm,
                                         externalAdd = pendingAddUrls,
                                         onExternalAddHandled = { pendingAddUrls = null },
-                                    ) {
-                                        drawerScope.launch { drawerState.open() }
-                                    }
+                                        onOpenDrawer = { drawerScope.launch { drawerState.open() } },
+                                        onOpenLog = { screen = Screen.Log },
+                                    )
                                 Screen.Settings -> {
                                     BackHandler { screen = Screen.List }
                                     SettingsScreen(settingsRepo) { screen = Screen.List }
@@ -173,6 +173,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // Without setIntent, a rotation rebuild replays the ORIGINAL intent in
+        // onCreate — the newest shared URL is lost and a stale one resurrects.
+        setIntent(intent)
         handleIntent(intent)
     }
 
@@ -193,7 +196,8 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        private val URL_REGEX = Regex("""(https?|magnet|ftp|ftps|sftp)://\S+|magnet:\?\S+""")
+        // ftps/sftp are not engine-supported schemes — don't offer to add them.
+        private val URL_REGEX = Regex("""(https?|magnet|ftp)://\S+|magnet:\?\S+""")
     }
 }
 

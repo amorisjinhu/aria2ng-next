@@ -20,7 +20,10 @@ val releaseKeystoreReady = keystoreProps["storeFile"] != null
 
 android {
     namespace = "com.slipstream"
-    compileSdk = 37
+    compileSdk =
+        libs.versions.compileSdk
+            .get()
+            .toInt()
 
     signingConfigs {
         create("release") {
@@ -37,8 +40,14 @@ android {
 
     defaultConfig {
         applicationId = "com.aria2ngnext"
-        minSdk = 24
-        targetSdk = 37
+        minSdk =
+            libs.versions.minSdk
+                .get()
+                .toInt()
+        targetSdk =
+            libs.versions.targetSdk
+                .get()
+                .toInt()
         versionCode = 4
         versionName = "0.1.3"
         // UTC build stamp for the About page — distinguishes same-version builds.
@@ -109,4 +118,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons)
+    testImplementation(libs.junit)
+    // Plain Android modules don't auto-map kotlin-test to a framework —
+    // the junit variant carries the @Test mapping explicitly.
+    testImplementation(libs.kotlin.test.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
