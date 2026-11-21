@@ -158,6 +158,91 @@
     <string name="license_label">License</string>
     <string name="license_engine">GPLv2+ (engine) — see assets/NOTICE.txt</string>
 
+    <!-- Task scopes -->
+    <string name="scope_all">All</string>
+    <string name="scope_progress">In progress</string>
+    <string name="scope_failed">Failed</string>
+    <string name="scope_completed">Completed</string>
+    <string name="scope_empty_progress">No active downloads</string>
+    <string name="scope_empty_failed">No failed downloads</string>
+    <string name="scope_empty_completed">No completed downloads</string>
+
+    <!-- Settings tabs -->
+    <string name="tab_general">General</string>
+    <string name="tab_downloads">Downloads</string>
+    <string name="tab_bt">BitTorrent</string>
+    <string name="tab_network">Network</string>
+    <string name="tab_ext">Extension</string>
+    <string name="tab_advanced">Advanced</string>
+    <string name="cd_back">Back</string>
+    <string name="app_section">App</string>
+    <string name="set_sub_general">Theme, about &amp; engine restart</string>
+    <string name="set_sub_downloads">Directory, limits, categories &amp; download options</string>
+    <string name="set_sub_bt">Seeding, listen port, trackers &amp; discovery</string>
+    <string name="set_sub_network">TLS, proxy, timeouts &amp; User-Agent</string>
+    <string name="set_sub_ext">Browser extension API &amp; alerts</string>
+    <string name="set_sub_advanced">RPC &amp; custom engine options</string>
+    <string name="restart_engine">Restart engine</string>
+    <string name="platform">Platform</string>
+    <string name="platform_value">Android %1$s (API %2$d)</string>
+    <string name="save">Save</string>
+
+    <!-- Typed engine options -->
+    <string name="blank_engine_default">blank = engine default</string>
+    <string name="opt_number_invalid">Must be a non-negative number</string>
+    <string name="tri_default">Default</string>
+    <string name="tri_on">On</string>
+    <string name="tri_off">Off</string>
+    <string name="opt_max_concurrent">Parallel downloads</string>
+    <string name="opt_split">Segments per download (-s)</string>
+    <string name="opt_max_connections">Connections per server (-x)</string>
+    <string name="opt_max_tries">Max tries</string>
+    <string name="opt_retry_wait">Retry wait (s)</string>
+    <string name="opt_file_allocation">File allocation</string>
+    <string name="opt_seed_ratio">Seed ratio</string>
+    <string name="opt_seed_time">Seed time (min)</string>
+    <string name="opt_bt_max_peers">Max peers</string>
+    <string name="opt_bt_listen_port">BT listen port</string>
+    <string name="opt_bt_tracker">Extra trackers</string>
+    <string name="opt_bt_tracker_sub">One per line; blank = engine default</string>
+    <string name="opt_enable_dht">DHT</string>
+    <string name="opt_enable_pex">Peer exchange (PEX)</string>
+    <string name="opt_enable_lpd">Local peer discovery (LPD)</string>
+    <string name="opt_all_proxy">Proxy (all-proxy)</string>
+    <string name="opt_connect_timeout">Connect timeout (s)</string>
+    <string name="opt_timeout">Timeout (s)</string>
+    <string name="opt_user_agent">User-Agent</string>
+
+    <!-- File categories -->
+    <string name="cat_enabled">Categorize by file type</string>
+    <string name="cat_enabled_sub">Route new downloads into per-category folders; an explicit directory always wins</string>
+    <string name="cat_manage">Manage categories</string>
+    <string name="cat_count">%1$d categories</string>
+    <string name="cat_summary">%1$d ext · %2$d url</string>
+    <string name="cat_add">Add</string>
+    <string name="cat_reset">Reset to defaults</string>
+    <string name="cat_reset_confirm">Tap again to confirm</string>
+    <string name="cat_delete">Delete</string>
+    <string name="cat_back">Back to list</string>
+    <string name="cat_label">Label</string>
+    <string name="cat_ext_hint">Extensions (comma separated)</string>
+    <string name="cat_url_hint">URL patterns (one per line)</string>
+    <string name="cat_dir_label">Directory</string>
+    <string name="cat_dir_mode_rel">Relative</string>
+    <string name="cat_dir_mode_abs">Absolute</string>
+    <string name="cat_mode_wildcard">Wildcard</string>
+    <string name="cat_mode_regex">Regex</string>
+    <string name="cat_videos">Videos</string>
+    <string name="cat_music">Music</string>
+    <string name="cat_images">Images</string>
+    <string name="cat_documents">Documents</string>
+    <string name="cat_archives">Archives</string>
+    <string name="cat_programs">Programs</string>
+    <string name="cat_err_basedir">Download directory must be an absolute path</string>
+    <string name="cat_err_dir">Category %1$d: invalid directory (relative = no leading / or ..; absolute = starts with /)</string>
+    <string name="cat_err_regex">Category %1$d, line %2$d: invalid regex</string>
+    <string name="cat_err_toolong">Category %1$d, line %2$d: pattern over 512 chars</string>
+
     <!-- Engine event notifications -->
     <string name="channel_engine">Download engine</string>
     <string name="channel_events">Download events</string>

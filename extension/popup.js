@@ -96,7 +96,7 @@ async function loadInner() {
       b.onclick = async () => {
         try {
           await api(`/tasks/${t.gid}/${t.status === "paused" ? "resume" : "pause"}`, "POST");
-        } catch (_) {}
+        } catch (_) { }
         load();
       };
       ops.appendChild(b);

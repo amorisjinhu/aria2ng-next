@@ -1,7 +1,17 @@
 {
-  "menuTitle": { "message": "用 aria2ng-next 下载" },
-  "sentConfirm": { "message": "已发送 — 请在应用内确认" },
-  "sendFailed": { "message": "发送失败" },
-  "noToken": { "message": "请先在扩展设置中填入应用令牌" },
-  "fallbackNote": { "message": "应用不可达 — 已交回浏览器下载" }
+  "menuTitle": {
+    "message": "用 aria2ng-next 下载"
+  },
+  "sentConfirm": {
+    "message": "已发送 — 请在应用内确认"
+  },
+  "sendFailed": {
+    "message": "发送失败"
+  },
+  "noToken": {
+    "message": "请先在扩展设置中填入应用令牌"
+  },
+  "fallbackNote": {
+    "message": "应用不可达 — 已交回浏览器下载"
+  }
 }

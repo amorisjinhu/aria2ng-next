@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -58,6 +59,25 @@ class DownloadViewModel(
             live + hist.filter { h -> live.none { it.gid == h.gid } }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private val _scope = MutableStateFlow(TaskScope.ALL)
+    val scope: StateFlow<TaskScope> = _scope.asStateFlow()
+
+    val scopedDownloads: StateFlow<List<Download>> =
+        combine(downloads, _scope) { list, s -> list.filter { s.matches(it) } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val scopeCounts: StateFlow<Map<TaskScope, Int>> =
+        downloads
+            .map { scopeCounts(it) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), scopeCounts(emptyList()))
+
+    fun setScope(s: TaskScope) {
+        _scope.value = s
+        // Hidden entries must not stay selected — a batch delete on stale
+        // gids would wipe tasks the user can't see.
+        clearSelection()
+    }
+
     private val _speedHistory = MutableStateFlow<List<Long>>(emptyList())
     val speedHistory: StateFlow<List<Long>> = _speedHistory.asStateFlow()
 
@@ -74,6 +94,20 @@ class DownloadViewModel(
         viewModelScope.launch {
             engine.manager.globalStat.collect { stat ->
                 stat?.let { _speedHistory.update { h -> (h + it.downloadSpeed).takeLast(60) } }
+            }
+        }
+        // Selection must stay a subset of the visible scope — a task migrating
+        // partitions (ACTIVE → COMPLETE) would otherwise leave a stale gid that
+        // deleteBatch (which snapshots the full list) would wipe unseen. Prune
+        // on EVERY emission, including an empty snapshot: engine stop clears
+        // the list → selection mode exits; after a restart the user re-selects.
+        // The VM's own subscription keeps scopedDownloads alive (one filter per
+        // refresh — acceptable); setScope() still clears eagerly rather than
+        // waiting for the next emission.
+        viewModelScope.launch {
+            scopedDownloads.collect { list ->
+                val visible = visibleGids(list)
+                _selected.update { pruneSelection(it, visible) }
             }
         }
     }
@@ -99,7 +133,7 @@ class DownloadViewModel(
     }
 
     fun selectAll() {
-        _selected.value = downloads.value.map { it.gid }.toSet()
+        _selected.value = scopedDownloads.value.map { it.gid }.toSet()
     }
 
     fun clearSelection() {
@@ -143,7 +177,20 @@ class DownloadViewModel(
         opts: Map<String, String>,
     ) {
         rpcOp {
-            engine.manager.add(urls, opts.takeIf { it.isNotEmpty() })
+            var options = opts
+            val catSpec = engine.categorySpec
+            // An explicit dir always wins over classification — same rule as
+            // RayBurst's dirUserModified/rememberedDirectory suppression.
+            if (catSpec.enabled && options["dir"].isNullOrBlank()) {
+                com.slipstream.model.FileCategories
+                    .resolveDir(
+                        com.slipstream.model.FileCategories
+                            .addCandidates(urls, options),
+                        catSpec.categories,
+                        engine.spec.dir,
+                    )?.let { options = options + ("dir" to it) }
+            }
+            engine.manager.add(urls, options.takeIf { it.isNotEmpty() })
             // Close only on success — a failed add must not eat the draft.
             _addDialogText.value = null
         }
@@ -151,6 +198,9 @@ class DownloadViewModel(
 
     fun addTorrent(uri: Uri) {
         rpcOp {
+            // No file-category routing for torrents: the payload filename is
+            // unknown until metadata resolves. RayBurst classifies torrents
+            // post-metadata via its BT file selector, which this app lacks.
             // Payload read off the main thread — a multi-MB .torrent must not jank the UI.
             val base64 =
                 withContext(Dispatchers.IO) {

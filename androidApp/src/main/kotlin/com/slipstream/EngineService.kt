@@ -69,6 +69,10 @@ class EngineService : Service() {
                 .collect { spec -> engine.updateExtApi(spec) }
         }
 
+        // File categories: volatile runtime state (add-time only) — no engine
+        // restart, no token seeding, no debounce needed.
+        scope.launch { repo.categorySpec.collect { engine.updateCategorySpec(it) } }
+
         // Pending ext submissions → one notification that tracks the queue:
         // posted on first request, refreshed per change, gone when drained.
         scope.launch {
@@ -123,6 +127,7 @@ class EngineService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
+
             ACTION_PAUSE_ALL -> scope.launch { runCatching { engine.manager.pauseAll() } }
             ACTION_RESUME_ALL -> scope.launch { runCatching { engine.manager.unpauseAll() } }
             // Notification action buttons — act on the item the notification
@@ -135,12 +140,14 @@ class EngineService : Service() {
                     scope.launch { runCatching { engine.confirmExtAdd(p) } }
                 }
             }
+
             ACTION_EXT_DECLINE -> {
                 val id = intent.getLongExtra(EXTRA_PENDING_ID, -1)
                 engine.extPending.value
                     .firstOrNull { it.id == id }
                     ?.let { engine.dismissExtAdd(it) }
             }
+
             else -> {
                 startForeground(NOTIFICATION_ID, buildNotification())
                 wantRunning = true

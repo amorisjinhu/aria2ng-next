@@ -54,6 +54,18 @@ class EngineProcess private constructor(
     var client: Aria2Client = Aria2Client(spec.rpcEndpoint, spec.rpcToken, scope)
         private set
 
+    // File categories: app-level runtime state like extSpec — consulted at
+    // add-time only, so updates never restart the engine.
+    @Volatile
+    var categorySpec: com.slipstream.model.CategorySpec =
+        com.slipstream.model.FileCategories
+            .defaults()
+        private set
+
+    fun updateCategorySpec(s: com.slipstream.model.CategorySpec) {
+        if (s != categorySpec) categorySpec = s
+    }
+
     // Bound once at init; resolves the current client so spec changes
     // don't orphan the UI's collected StateFlow.
     val manager: DownloadManager = DownloadManager({ client }, scope, ::appendLog)
@@ -338,7 +350,10 @@ class EngineProcess private constructor(
                         caCertificatePath = caBundle?.absolutePath,
                         parentPid = android.os.Process.myPid(),
                     )
-            Log.i(TAG, "exec: ${args.joinToString(" ") { a -> if (a.startsWith("--rpc-secret=")) "--rpc-secret=***" else a }}")
+            Log.i(
+                TAG,
+                "exec: ${args.joinToString(" ") { a -> if (a.startsWith("--rpc-secret=")) "--rpc-secret=***" else a }}",
+            )
 
             val spawned =
                 ProcessBuilder(args)

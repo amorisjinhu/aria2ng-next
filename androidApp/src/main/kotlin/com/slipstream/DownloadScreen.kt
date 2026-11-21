@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Circle
@@ -27,6 +29,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,6 +56,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun DownloadScreen(
     engine: EngineProcess,
+    repo: SettingsRepo,
     vm: DownloadViewModel,
     externalAdd: List<String>?,
     onExternalAddHandled: () -> Unit,
@@ -68,6 +72,11 @@ internal fun DownloadScreen(
     val optionsEdit by vm.optionsEdit.collectAsState()
     val deleteAsk by vm.deleteAsk.collectAsState()
     val speedHistory by vm.speedHistory.collectAsState()
+    val catSpec by repo.categorySpec.collectAsState(
+        initial =
+            com.slipstream.model.FileCategories
+                .defaults(),
+    )
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -110,7 +119,10 @@ internal fun DownloadScreen(
                             IconButton(onClick = { vm.clearSelection() }) {
                                 Icon(Icons.Default.Close, contentDescription = stringResource(R.string.sel_exit))
                             }
-                            Text(stringResource(R.string.sel_count, selected.size), style = MaterialTheme.typography.titleLarge)
+                            Text(
+                                stringResource(R.string.sel_count, selected.size),
+                                style = MaterialTheme.typography.titleLarge,
+                            )
                             Spacer(Modifier.weight(1f))
                             TextButton(onClick = { vm.selectAll() }) {
                                 Text(stringResource(R.string.sel_all))
@@ -131,7 +143,11 @@ internal fun DownloadScreen(
                             Spacer(Modifier.width(16.dp))
                             globalStat?.let {
                                 Text(
-                                    stringResource(R.string.speed_line, formatSpeed(it.downloadSpeed), formatSpeed(it.uploadSpeed)),
+                                    stringResource(
+                                        R.string.speed_line,
+                                        formatSpeed(it.downloadSpeed),
+                                        formatSpeed(it.uploadSpeed),
+                                    ),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.primary,
                                 )
@@ -156,8 +172,10 @@ internal fun DownloadScreen(
                                             tint = Color(0xFF4CAF50),
                                             modifier = Modifier.size(12.dp),
                                         )
+
                                     is EngineProcess.State.Starting ->
                                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+
                                     is EngineProcess.State.Failed ->
                                         // Red, not the Stopped gray — a failed engine must
                                         // be visually distinct, with the reason below.
@@ -167,6 +185,7 @@ internal fun DownloadScreen(
                                             tint = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.size(12.dp),
                                         )
+
                                     else ->
                                         Icon(
                                             Icons.Outlined.Circle,
@@ -202,31 +221,52 @@ internal fun DownloadScreen(
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            if (downloads.isEmpty()) {
-                Text(
-                    stringResource(R.string.empty_list_hint),
-                    modifier = Modifier.align(Alignment.Center),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                LazyColumn(
-                    Modifier.fillMaxSize().padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(downloads, key = { it.gid }) { d ->
-                        DownloadCard(
-                            modifier = Modifier.animateItem(),
-                            download = d,
-                            selected = d.gid in selected,
-                            // Long-press enters selection mode; in selection
-                            // mode taps toggle instead of opening the detail
-                            onClick = { if (selected.isNotEmpty()) vm.toggleSel(d.gid) else vm.showDetail(d) },
-                            onLongClick = { if (selected.isEmpty()) vm.toggleSel(d.gid) },
-                            onPause = { vm.pause(d.gid) },
-                            onResume = { vm.resume(d.gid) },
-                            onRetry = { vm.retry(d) },
-                        )
+        val scope by vm.scope.collectAsState()
+        val counts by vm.scopeCounts.collectAsState()
+        val scoped by vm.scopedDownloads.collectAsState()
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TaskScope.entries.forEach { s ->
+                    FilterChip(
+                        selected = scope == s,
+                        onClick = { vm.setScope(s) },
+                        label = {
+                            Text(
+                                stringResource(scopeLabel(s)) + " " + (counts[s] ?: 0),
+                            )
+                        },
+                    )
+                }
+            }
+            Box(Modifier.fillMaxSize()) {
+                if (scoped.isEmpty()) {
+                    Text(
+                        stringResource(scopeEmptyHint(scope)),
+                        modifier = Modifier.align(Alignment.Center),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    LazyColumn(
+                        Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(scoped, key = { it.gid }) { d ->
+                            DownloadCard(
+                                modifier = Modifier.animateItem(),
+                                download = d,
+                                selected = d.gid in selected,
+                                // Long-press enters selection mode; in selection
+                                // mode taps toggle instead of opening the detail
+                                onClick = { if (selected.isNotEmpty()) vm.toggleSel(d.gid) else vm.showDetail(d) },
+                                onLongClick = { if (selected.isEmpty()) vm.toggleSel(d.gid) },
+                                onPause = { vm.pause(d.gid) },
+                                onResume = { vm.resume(d.gid) },
+                                onRetry = { vm.retry(d) },
+                            )
+                        }
                     }
                 }
             }
@@ -238,6 +278,8 @@ internal fun DownloadScreen(
             initialText = initial,
             onDismiss = { vm.dismissAdd() },
             onAdd = { urls, opts -> vm.addUrls(urls, opts) },
+            categorySpec = catSpec,
+            baseDir = engine.spec.dir,
             onPickTorrent = {
                 torrentPicker.launch(arrayOf("application/x-bittorrent", "application/octet-stream", "*/*"))
                 vm.dismissAdd()
@@ -265,10 +307,30 @@ internal fun DownloadScreen(
 
     optionsEdit?.let { (gid, opts) ->
         OptionsEditorDialog(
-            title = stringResource(R.string.options_dialog_prefix, downloads.find { it.gid == gid }?.name ?: gid.take(8)),
+            title =
+                stringResource(
+                    R.string.options_dialog_prefix,
+                    downloads.find { it.gid == gid }?.name ?: gid.take(8),
+                ),
             initial = opts,
             onDismiss = { vm.dismissOptions() },
             onApply = { map -> vm.applyOptions(gid, map) },
         )
     }
 }
+
+private fun scopeLabel(s: TaskScope): Int =
+    when (s) {
+        TaskScope.ALL -> R.string.scope_all
+        TaskScope.PROGRESS -> R.string.scope_progress
+        TaskScope.FAILED -> R.string.scope_failed
+        TaskScope.COMPLETED -> R.string.scope_completed
+    }
+
+private fun scopeEmptyHint(s: TaskScope): Int =
+    when (s) {
+        TaskScope.ALL -> R.string.empty_list_hint
+        TaskScope.PROGRESS -> R.string.scope_empty_progress
+        TaskScope.FAILED -> R.string.scope_empty_failed
+        TaskScope.COMPLETED -> R.string.scope_empty_completed
+    }

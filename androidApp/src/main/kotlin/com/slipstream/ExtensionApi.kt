@@ -247,7 +247,8 @@ class ExtensionApiServer(
         if (engine.state.value !is EngineProcess.State.Running) {
             // The extension's 503 taxonomy: starting → it retries,
             // unavailable → the browser keeps the download.
-            val code = if (engine.state.value is EngineProcess.State.Starting) "engine_starting" else "engine_unavailable"
+            val code =
+                if (engine.state.value is EngineProcess.State.Starting) "engine_starting" else "engine_unavailable"
             return respond(out, 503, """{"error":"$code"}""")
         }
 
@@ -326,10 +327,25 @@ class ExtensionApiServer(
             when (val r = verifyProbe(url, opts, str("mime"))) {
                 is ProbeResult.Mismatch ->
                     return respond(out, 200, """{"action":"fallback","reason":"${r.reason}"}""")
+
                 ProbeResult.Unavailable ->
                     return respond(out, 200, """{"action":"fallback","reason":"unreachable"}""")
+
                 is ProbeResult.Ok -> probeInfo = r.info
             }
+        }
+
+        // File categories (post-probe so aria2.probe sees the same options as
+        // before): one candidate stands for the whole submission. `dir` never
+        // arrives in the request schema, so an enabled rule always applies.
+        val catSpec = engine.categorySpec
+        if (catSpec.enabled) {
+            com.slipstream.model.FileCategories
+                .resolveDir(
+                    listOf(com.slipstream.model.Candidate(path = filename ?: url, urls = listOf(url))),
+                    catSpec.categories,
+                    engine.spec.dir,
+                )?.let { opts["dir"] = it }
         }
 
         // Meta enrichment: the engine's probe beats the browser's fields —
@@ -340,7 +356,11 @@ class ExtensionApiServer(
             PendingAdd(
                 url = url,
                 options = opts,
-                displayName = filename ?: probeInfo?.filename ?: url.substringAfterLast('/').substringBefore('?').ifBlank { url },
+                displayName =
+                    filename ?: probeInfo?.filename ?: url
+                        .substringAfterLast('/')
+                        .substringBefore('?')
+                        .ifBlank { url },
                 sizeBytes = probeInfo?.totalLength ?: obj["size"]?.jsonPrimitive?.longOrNull,
                 referer = str("referer"),
             )
@@ -349,7 +369,11 @@ class ExtensionApiServer(
         }
         engine.enqueueExtAdd(pending)
         // Query strings can carry credentials — keep them out of the log.
-        logger("ext-api add: ${pending.displayName} (${pending.sizeBytes ?: -1}B) ← ${url.substringBefore('?')}")
+        logger(
+            "ext-api add: ${pending.displayName} (${pending.sizeBytes ?: -1}B)" +
+                opts["dir"]?.let { " → $it" }.orEmpty() +
+                " ← ${url.substringBefore('?')}",
+        )
 
         if (str("ack") != "final") {
             // early: extension drops its download now; the in-app dialog owns it
@@ -531,10 +555,12 @@ class ExtensionApiServer(
                         engine.manager.pause(gid)
                         true
                     }
+
                     "resume" -> {
                         engine.manager.resume(gid)
                         true
                     }
+
                     else -> engine.revealExtTask(gid)
                 }
             }.getOrDefault(false)

@@ -9,9 +9,13 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.slipstream.engine.EngineSpec
 import com.slipstream.engine.RpcTransport
+import com.slipstream.model.CategorySpec
+import com.slipstream.model.FileCategories
+import com.slipstream.model.FileCategory
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -59,7 +63,9 @@ class SettingsRepo(
                     rpcToken = p[RPC_TOKEN]?.takeIf { it.isNotBlank() } ?: randomToken(),
                     rpcListenAll = p[LISTEN_ALL] ?: false,
                     rpcAllowOriginAll = p[ALLOW_ORIGIN_ALL] ?: false,
-                    rpcTransport = p[RPC_TRANSPORT]?.let { runCatching { RpcTransport.valueOf(it) }.getOrNull() } ?: RpcTransport.WS,
+                    rpcTransport =
+                        p[RPC_TRANSPORT]?.let { runCatching { RpcTransport.valueOf(it) }.getOrNull() }
+                            ?: RpcTransport.WS,
                     dir = p[DIR] ?: EngineProcess.defaultDownloadDir(context),
                     // With a bundled CA the safe default is ON; without one, ON
                     // would break every HTTPS download (no system store on Android).
@@ -127,6 +133,46 @@ class SettingsRepo(
             it[EXT_LISTEN_ALL] = spec.listenAll
         }
 
+    /**
+     * File-category prefs — app-level like extSpec, never restarts the engine.
+     * Read-side fallbacks: blank/bad JSON or "enabled with an empty table"
+     * hydrate to the built-in set, matching RayBurst's hydration guard.
+     */
+    val categorySpec: Flow<CategorySpec> =
+        context.settingsStore.data
+            .catch { e ->
+                android.util.Log.e("SettingsRepo", "category settings read failed — falling back to defaults", e)
+                emit(emptyPreferences())
+            }.map { p ->
+                val enabled = p[CATEGORY_ENABLED] ?: false
+                val parsed =
+                    p[CATEGORIES]
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { raw ->
+                            runCatching {
+                                Json.decodeFromString(ListSerializer(FileCategory.serializer()), raw)
+                            }.getOrNull()
+                        }
+                val categories =
+                    when {
+                        parsed == null -> FileCategories.BUILTIN
+                        enabled && parsed.isEmpty() -> FileCategories.BUILTIN
+                        else -> parsed
+                    }
+                CategorySpec(enabled, categories.map(FileCategories::normalize))
+            }
+
+    suspend fun saveCategories(spec: CategorySpec) =
+        context.settingsStore.edit {
+            it[CATEGORY_ENABLED] = spec.enabled
+            it[CATEGORIES] =
+                if (spec.categories.isEmpty()) {
+                    ""
+                } else {
+                    Json.encodeToString(ListSerializer(FileCategory.serializer()), spec.categories)
+                }
+        }
+
     /** UI-only pref — theme changes must not restart the engine. */
     val themeMode: Flow<Int> =
         context.settingsStore.data
@@ -173,5 +219,7 @@ class SettingsRepo(
         private val EXT_PORT = intPreferencesKey("ext_port")
         private val EXT_TOKEN = stringPreferencesKey("ext_token")
         private val EXT_LISTEN_ALL = booleanPreferencesKey("ext_listen_all")
+        private val CATEGORY_ENABLED = booleanPreferencesKey("category_enabled")
+        private val CATEGORIES = stringPreferencesKey("categories")
     }
 }

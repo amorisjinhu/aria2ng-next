@@ -4,6 +4,10 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
+    // kotlinx-serialization-json is already a dep; the compiler plugin is what
+    // generates .serializer() for @Serializable classes declared in this module
+    // (SettingsDraft.DraftSnapshot for the rotation-survival JSON saver).
+    alias(libs.plugins.kotlin.serialization)
 }
 
 // release.jks + keystore.properties are gitignored local secrets. Missing on

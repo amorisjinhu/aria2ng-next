@@ -1,527 +1,243 @@
 package com.slipstream
 
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.slipstream.engine.EngineSpec
-import com.slipstream.engine.RpcTransport
 import kotlinx.coroutines.launch
 
+/** Settings destinations — the menu lists them, each opens its own tab file. */
+internal enum class SettingsTab(
+    val labelRes: Int,
+    val subRes: Int,
+    val icon: ImageVector,
+) {
+    GENERAL(R.string.tab_general, R.string.set_sub_general, Icons.Default.Settings),
+    DOWNLOADS(R.string.tab_downloads, R.string.set_sub_downloads, Icons.Default.Download),
+    BT(R.string.tab_bt, R.string.set_sub_bt, Icons.Default.Hub),
+    NETWORK(R.string.tab_network, R.string.set_sub_network, Icons.Default.Public),
+    EXT(R.string.tab_ext, R.string.set_sub_ext, Icons.Default.Extension),
+    ADVANCED(R.string.tab_advanced, R.string.set_sub_advanced, Icons.Default.Code),
+}
+
+/** App-level pages (never restart the engine). */
+private val appTabs = listOf(SettingsTab.GENERAL, SettingsTab.EXT)
+
+/** Engine pages (a changed EngineSpec restarts once, via the spec collector). */
+private val engineTabs = listOf(SettingsTab.DOWNLOADS, SettingsTab.BT, SettingsTab.NETWORK, SettingsTab.ADVANCED)
+
 /**
- * Engine settings screen. Saving writes all fields to DataStore in one edit;
- * EngineService's debounced collector then restarts the engine with the new
- * EngineSpec — the single-source-of-truth contract from the legacy fixes.
+ * Master-detail settings: the root is a RikkaHub-style entry list; tapping an
+ * entry drills into that page. All editable state lives in a shared
+ * [SettingsDraft] remembered across navigation; Save writes each flow only
+ * when it actually changed — ext/category writes never reach the engine spec,
+ * so the engine restarts only when an EngineSpec field moved.
  */
 @Composable
 fun SettingsScreen(
     repo: SettingsRepo,
+    engine: EngineProcess,
     onBack: () -> Unit,
 ) {
     val spec by repo.spec.collectAsState(initial = null)
     val extSpec by repo.extSpec.collectAsState(initial = null)
+    val catSpec by repo.categorySpec.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
 
     val s = spec ?: return // first DataStore emission hasn't arrived
     val es = extSpec ?: return
+    val cs = catSpec ?: return
 
-    var port by remember(s) { mutableStateOf(s!!.rpcPort.toString()) }
-    var token by remember(s) { mutableStateOf(s!!.rpcToken) }
-    var dir by remember(s) { mutableStateOf(s!!.dir) }
-    var listenAll by remember(s) { mutableStateOf(s!!.rpcListenAll) }
-    var allowOriginAll by remember(s) { mutableStateOf(s!!.rpcAllowOriginAll) }
-    var transport by remember(s) { mutableStateOf(s!!.rpcTransport) }
-    var checkCert by remember(s) { mutableStateOf(s!!.checkCertificate) }
-    var saveSession by remember(s) { mutableStateOf(s!!.saveSession) }
-    var dlLimit by remember(s) { mutableStateOf(s!!.dlLimitKbps.takeIf { it > 0 }?.toString() ?: "") }
-    var ulLimit by remember(s) { mutableStateOf(s!!.ulLimitKbps.takeIf { it > 0 }?.toString() ?: "") }
-    val customOptions = remember(s) { OptionsEditorState(s!!.customOptions) }
-
-    var extEnabled by remember(es) { mutableStateOf(es!!.enabled) }
-    var extPort by remember(es) { mutableStateOf(es!!.port.toString()) }
-    var extToken by remember(es) { mutableStateOf(es!!.token) }
-    var extListenAll by remember(es) { mutableStateOf(es!!.listenAll) }
+    // Shared draft: survives tab navigation and rotation via rememberSaveable
+    // + a JSON snapshot saver (unchanged inputs restore the snapshot; a fresh
+    // spec/ext/category emission rebuilds the draft — same semantics as before).
+    val draft = rememberSaveable(s, es, cs, saver = SettingsDraft.Saver) { SettingsDraft.from(s, es, cs) }
+    var tab by rememberSaveable { mutableStateOf<SettingsTab?>(null) }
 
     Column(
         Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(stringResource(R.string.settings), style = MaterialTheme.typography.titleLarge)
-
-        Text(stringResource(R.string.appearance), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        val themeMode by repo.themeMode.collectAsState(initial = 0)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(
-                stringResource(R.string.theme_system) to 0,
-                stringResource(R.string.theme_light) to 1,
-                stringResource(R.string.theme_dark) to 2,
-            ).forEach { (label, mode) ->
-                FilterChip(
-                    selected = themeMode == mode,
-                    onClick = { scope.launch { repo.setThemeMode(mode) } },
-                    label = { Text(label) },
-                )
-            }
-        }
-
-        Text(stringResource(R.string.rpc_section), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-
-        // 0-1023 need root on Android; >65535 is invalid — either way the engine
-        // fails to bind and the user lands in the Failed state with no clue why
-        val portNum = port.toIntOrNull()
-        val portValid = portNum != null && portNum in 1024..65535
-        OutlinedTextField(
-            value = port,
-            onValueChange = { port = it.filter(Char::isDigit).take(5) },
-            label = { Text(stringResource(R.string.rpc_port)) },
-            isError = !portValid,
-            supportingText = {
-                if (!portValid) Text(stringResource(R.string.port_invalid))
+        AnimatedContent(
+            targetState = tab,
+            transitionSpec = {
+                val slide = tween<IntOffset>(220, easing = FastOutSlowInEasing)
+                val fade = tween<Float>(160)
+                // Drill-in: page enters from the right over the menu; back:
+                // the menu slides in from the left (same language as the
+                // outer screen switcher in MainActivity).
+                if (targetState != null) {
+                    (slideInHorizontally(slide) { it } + fadeIn(fade))
+                        .togetherWith(slideOutHorizontally(slide) { -it / 3 } + fadeOut(fade))
+                } else {
+                    (slideInHorizontally(slide) { -it } + fadeIn(fade))
+                        .togetherWith(slideOutHorizontally(slide) { it / 3 } + fadeOut(fade))
+                }
             },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = token,
-                onValueChange = { token = it },
-                label = { Text(stringResource(R.string.rpc_token)) },
-                modifier = Modifier.weight(1f),
-            )
-            // Persisted tokens survive upgrades on purpose; the dice rotates a
-            // known/weak secret on demand. Draft only — persisted on Save.
-            val cdRandomToken = stringResource(R.string.cd_random_token)
-            IconButton(onClick = { token = SettingsRepo.randomToken() }) {
-                Text(
-                    "🎲",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.semantics { contentDescription = cdRandomToken },
-                )
+            label = "settingsNav",
+            modifier = Modifier.fillMaxSize(),
+        ) { current ->
+            if (current == null) {
+                Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(stringResource(R.string.settings), style = MaterialTheme.typography.titleLarge)
+                    SettingSection(stringResource(R.string.app_section))
+                    appTabs.forEach { SettingsEntryRow(it) { tab = it } }
+                    SettingSection(stringResource(R.string.engine_section))
+                    engineTabs.forEach { SettingsEntryRow(it) { tab = it } }
+                }
+            } else {
+                // Composed only on a sub-page, so back drills up to the menu
+                // instead of leaving settings (the outer handler then applies).
+                BackHandler { tab = null }
+                Column(
+                    Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { tab = null }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.cd_back),
+                            )
+                        }
+                        Text(stringResource(current.labelRes), style = MaterialTheme.typography.titleLarge)
+                    }
+                    Box(Modifier.weight(1f)) {
+                        when (current) {
+                            SettingsTab.GENERAL -> SettingsGeneralTab(repo, engine)
+                            SettingsTab.DOWNLOADS -> SettingsDownloadsTab(draft)
+                            SettingsTab.BT -> SettingsBtTab(draft)
+                            SettingsTab.NETWORK -> SettingsNetworkTab(draft)
+                            SettingsTab.EXT -> SettingsExtTab(draft)
+                            SettingsTab.ADVANCED -> SettingsAdvancedTab(draft)
+                        }
+                    }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                // DataStore I/O can throw (disk full/IO error) — an
+                                // uncaught exception crashes the app from a button tap.
+                                runCatching {
+                                    // Unchanged flows are not rewritten: ext/category
+                                    // stores are engine-independent, and an identical
+                                    // EngineSpec write would restart for nothing.
+                                    val newExt = draft.toExtSpec(es)
+                                    if (newExt != es) repo.saveExt(newExt)
+                                    val newCat = draft.toCategorySpec()
+                                    if (newCat != cs) repo.saveCategories(newCat)
+                                    val newSpec = draft.toSpec(s)
+                                    if (newSpec != s) repo.save(newSpec)
+                                }.onSuccess {
+                                    onBack()
+                                }.onFailure { e ->
+                                    android.widget.Toast
+                                        .makeText(
+                                            ctx,
+                                            ctx.getString(R.string.save_failed, e.message ?: e.toString()),
+                                            android.widget.Toast.LENGTH_LONG,
+                                        ).show()
+                                }
+                            }
+                        },
+                        enabled = draft.valid,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.save_restart)) }
+                }
             }
         }
-        // aria2 exposes JSON-RPC over both transports on the same port; this
-        // picks which one the app uses. HTTP is stateless — no server push,
-        // so engine-event notifications only work over WebSocket.
-        Text(stringResource(R.string.rpc_transport), style = MaterialTheme.typography.bodyLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
-                selected = transport == RpcTransport.WS,
-                onClick = { transport = RpcTransport.WS },
-                label = { Text("WebSocket") },
-            )
-            FilterChip(
-                selected = transport == RpcTransport.HTTP,
-                onClick = { transport = RpcTransport.HTTP },
-                label = { Text("HTTP") },
-            )
-        }
-        Text(
-            stringResource(R.string.rpc_transport_sub),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        SettingSwitch(stringResource(R.string.listen_all), stringResource(R.string.listen_all_sub), listenAll) { listenAll = it }
-        SettingSwitch(
-            stringResource(R.string.allow_origin),
-            stringResource(R.string.allow_origin_sub),
-            allowOriginAll,
-        ) { allowOriginAll = it }
+    }
+}
 
-        Text(
-            stringResource(R.string.ext_section),
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        SettingSwitch(stringResource(R.string.ext_enabled), stringResource(R.string.ext_enabled_sub), extEnabled) { extEnabled = it }
-        val extPortNum = extPort.toIntOrNull()
-        val extPortValid = extPortNum != null && extPortNum in 1024..65535 && extPortNum != portNum
-        if (extEnabled) {
-            OutlinedTextField(
-                value = extPort,
-                onValueChange = { extPort = it.filter(Char::isDigit).take(5) },
-                label = { Text(stringResource(R.string.ext_port)) },
-                isError = !extPortValid,
-                supportingText = {
-                    if (!extPortValid) Text(stringResource(R.string.ext_port_invalid))
-                },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = extToken,
-                    onValueChange = { extToken = it },
-                    label = { Text(stringResource(R.string.ext_token)) },
-                    modifier = Modifier.weight(1f),
-                )
-                val cdExtToken = stringResource(R.string.cd_random_token)
-                IconButton(onClick = { extToken = SettingsRepo.randomToken() }) {
-                    Text(
-                        "🎲",
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.semantics { contentDescription = cdExtToken },
+/** Menu row: tonal icon circle + title + subtitle, RikkaHub-style. */
+@Composable
+private fun SettingsEntryRow(
+    tab: SettingsTab,
+    onClick: () -> Unit,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        onClick = onClick,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        tab.icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
                 }
             }
-            SettingSwitch(stringResource(R.string.listen_all), stringResource(R.string.ext_listen_all_sub), extListenAll) {
-                extListenAll =
-                    it
-            }
-            // Request alerts live on the OS side — channel toggles plus the
-            // OEM-specific "pop up while in background" grant that gates FSI.
-            val ctxExt = androidx.compose.ui.platform.LocalContext.current
-            SettingLink(
-                stringResource(R.string.ext_notif_alerts),
-                stringResource(R.string.ext_notif_alerts_sub),
-            ) { openChannelSettings(ctxExt) }
-            SettingLink(
-                stringResource(R.string.ext_bg_popup),
-                stringResource(R.string.ext_bg_popup_sub),
-            ) { openBgPopupSettings(ctxExt) }
-            SettingLink(
-                stringResource(R.string.ext_battery),
-                stringResource(R.string.ext_battery_sub),
-            ) { requestBatteryWhitelist(ctxExt) }
-        }
-
-        Text(
-            stringResource(R.string.engine_section),
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
-
-        OutlinedTextField(
-            value = dir,
-            onValueChange = { dir = it },
-            label = { Text(stringResource(R.string.download_dir)) },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        val ctx = androidx.compose.ui.platform.LocalContext.current
-        val isPublicDir = isPublicStoragePath(dir)
-        // API 24–28: WRITE_EXTERNAL_STORAGE is a RUNTIME permission — declaring
-        // it in the manifest grants nothing, and "SDK < 30 → granted" silently
-        // sent users into EACCES. API 30+: all-files access via system page.
-        val storageGranted =
-            if (Build.VERSION.SDK_INT >= 30) {
-                android.os.Environment.isExternalStorageManager()
-            } else {
-                androidx.core.content.ContextCompat.checkSelfPermission(
-                    ctx,
-                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            }
-        val storagePermLauncher =
-            rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-        // SAF tree picker → /storage/... path the engine can actually use
-        val dirPicker =
-            rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-                uri?.let { treeUriToPath(it) }?.let {
-                    dir = it
-                    if (Build.VERSION.SDK_INT < 30 && isPublicStoragePath(it) && !storageGranted) {
-                        storagePermLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    }
-                }
-            }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { dirPicker.launch(null) }) {
-                Text(stringResource(R.string.browse_dir))
-            }
-            TextButton(onClick = {
-                dir = "/storage/emulated/0/Download"
-                if (Build.VERSION.SDK_INT >= 30) {
-                    if (!android.os.Environment.isExternalStorageManager()) openAllFilesAccess(ctx)
-                } else if (!storageGranted) {
-                    storagePermLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                }
-            }) { Text(stringResource(R.string.use_public_download)) }
-            if (isPublicDir && !storageGranted) {
-                // Tap-through to the grant page — a bare warning leaves users stuck
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(tab.labelRes), style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    stringResource(
-                        if (Build.VERSION.SDK_INT >= 30) R.string.storage_warning else R.string.storage_warning_legacy,
-                    ),
+                    stringResource(tab.subRes),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
-                    modifier =
-                        Modifier.clickable {
-                            if (Build.VERSION.SDK_INT >= 30) {
-                                openAllFilesAccess(ctx)
-                            } else {
-                                storagePermLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                            }
-                        },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
-        SettingSwitch(stringResource(R.string.check_cert), stringResource(R.string.check_cert_sub), checkCert) { checkCert = it }
-        SettingSwitch(stringResource(R.string.save_session), stringResource(R.string.save_session_sub), saveSession) { saveSession = it }
-
-        Text(stringResource(R.string.speed_limits), style = MaterialTheme.typography.bodyLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = dlLimit,
-                onValueChange = { dlLimit = it.filter(Char::isDigit).take(7) },
-                label = { Text(stringResource(R.string.dl_limit)) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f),
-            )
-            OutlinedTextField(
-                value = ulLimit,
-                onValueChange = { ulLimit = it.filter(Char::isDigit).take(7) },
-                label = { Text(stringResource(R.string.ul_limit)) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Text(
-            stringResource(R.string.limits_sub),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Text(
-            stringResource(R.string.custom_options),
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            stringResource(R.string.forced_params_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OptionsEditor(state = customOptions, catalog = OptionCatalog.global)
-        TextButton(onClick = {
-            customOptions.addAll(
-                mapOf(
-                    "max-connection-per-server" to "16",
-                    "split" to "64",
-                    "min-split-size" to "1M",
-                    "file-allocation" to "none",
-                ),
-            )
-        }) { Text(stringResource(R.string.perf_preset)) }
-
-        Button(
-            onClick = {
-                scope.launch {
-                    // DataStore I/O can throw (disk full/IO error) — an uncaught
-                    // exception here crashes the app from a button tap.
-                    runCatching {
-                        repo.saveExt(
-                            ExtApiSpec(
-                                enabled = extEnabled,
-                                port = extPort.toIntOrNull() ?: es!!.port,
-                                token = extToken.ifBlank { es!!.token },
-                                listenAll = extListenAll,
-                            ),
-                        )
-                        repo.save(
-                            EngineSpec(
-                                rpcPort = portNum ?: s!!.rpcPort,
-                                rpcToken = token.ifBlank { s!!.rpcToken },
-                                rpcListenAll = listenAll,
-                                rpcAllowOriginAll = allowOriginAll,
-                                rpcTransport = transport,
-                                dir = dir.ifEmpty { s!!.dir },
-                                checkCertificate = checkCert,
-                                saveSession = saveSession,
-                                dlLimitKbps = dlLimit.toIntOrNull() ?: 0,
-                                ulLimitKbps = ulLimit.toIntOrNull() ?: 0,
-                                customOptions = customOptions.result(),
-                            ),
-                        )
-                    }.onSuccess {
-                        onBack()
-                    }.onFailure { e ->
-                        android.widget.Toast
-                            .makeText(
-                                ctx,
-                                ctx.getString(R.string.save_failed, e.message ?: e.toString()),
-                                android.widget.Toast.LENGTH_LONG,
-                            ).show()
-                    }
-                }
-            },
-            // A saved-but-invalid ext port would bind-fail silently — block it
-            // the same way the RPC port does.
-            enabled = portValid && (!extEnabled || extPortValid),
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(R.string.save_restart)) }
     }
-}
-
-/**
- * "primary:Download/x" → "/storage/emulated/0/Download/x"; SD volume UUID →
- * "/storage/<UUID>/…". Any other authority (cloud documents etc.) has NO
- * filesystem path — returning a fabricated "/storage/<docId>" would point
- * the engine at garbage, so reject it outright.
- */
-private fun treeUriToPath(uri: android.net.Uri): String? {
-    val docId = android.provider.DocumentsContract.getTreeDocumentId(uri) ?: return null
-    val parts = docId.split(":", limit = 2)
-    val volume = parts[0]
-    val base =
-        when {
-            volume.equals("primary", ignoreCase = true) -> "/storage/emulated/0"
-            Regex("[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}").matches(volume) -> "/storage/$volume"
-            else -> return null
-        }
-    val rel = parts.getOrElse(1) { "" }
-    return if (rel.isEmpty()) base else "$base/$rel"
-}
-
-@Composable
-private fun SettingSwitch(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onChange: (Boolean) -> Unit,
-) {
-    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Switch(checked = checked, onCheckedChange = onChange)
-        }
-    }
-}
-
-@Composable
-private fun SettingLink(
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit,
-) {
-    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, onClick = onClick) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-    }
-}
-
-/** Settings pages can be absent on stripped OEM builds — never crash on the jump. */
-private fun startSettings(
-    ctx: android.content.Context,
-    intent: android.content.Intent,
-) {
-    runCatching { ctx.startActivity(intent) }.onFailure {
-        android.widget.Toast
-            .makeText(ctx, ctx.getString(R.string.settings_page_failed), android.widget.Toast.LENGTH_SHORT)
-            .show()
-    }
-}
-
-/** Deep-link into the ext-request channel's alert toggles (banner/sound/lockscreen). */
-private fun openChannelSettings(ctx: android.content.Context) {
-    startSettings(
-        ctx,
-        android.content
-            .Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
-            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
-            .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, EngineService.EXT_CHANNEL_ID),
-    )
-}
-
-/**
- * MIUI/HyperOS gates full-screen intents behind a per-app "pop up while in
- * background" switch that only exists in its own permission editor. Fall back
- * to the generic app-details page on other OEMs.
- */
-private fun openBgPopupSettings(ctx: android.content.Context) {
-    val miui =
-        android.content
-            .Intent("miui.intent.action.APP_PERM_EDITOR")
-            .setClassName(
-                "com.miui.securitycenter",
-                "com.miui.permcenter.permissions.PermissionsEditorActivity",
-            ).putExtra("extra_pkgname", ctx.packageName)
-    val intent =
-        if (miui.resolveActivity(ctx.packageManager) != null) {
-            miui
-        } else {
-            android.content.Intent(
-                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                android.net.Uri.parse("package:${ctx.packageName}"),
-            )
-        }
-    startSettings(ctx, intent)
-}
-
-/**
- * Deep-link to the doze/battery-optimization whitelist dialog — the single
- * switch that keeps the Extension API reachable while the app is backgrounded.
- * Already whitelisted → fall back to the app details page.
- */
-private fun requestBatteryWhitelist(ctx: android.content.Context) {
-    val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
-    val intent =
-        if (pm.isIgnoringBatteryOptimizations(ctx.packageName)) {
-            android.content.Intent(
-                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                android.net.Uri.parse("package:${ctx.packageName}"),
-            )
-        } else {
-            android.content.Intent(
-                android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                android.net.Uri.parse("package:${ctx.packageName}"),
-            )
-        }
-    startSettings(ctx, intent)
-}
-
-/** Jump to this app's "All files access" grant page (API 30+). */
-private fun openAllFilesAccess(ctx: android.content.Context) {
-    startSettings(
-        ctx,
-        android.content.Intent(
-            android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-            android.net.Uri.parse("package:${ctx.packageName}"),
-        ),
-    )
 }

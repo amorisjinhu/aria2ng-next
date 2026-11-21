@@ -38,6 +38,8 @@ internal fun AddDownloadDialog(
     onDismiss: () -> Unit,
     onAdd: (List<String>, Map<String, String>) -> Unit,
     onPickTorrent: () -> Unit,
+    categorySpec: com.slipstream.model.CategorySpec,
+    baseDir: String,
 ) {
     // Keyed on initialText: a new share/intent prefill must replace the draft,
     // not be swallowed by a remembered stale one.
@@ -45,6 +47,24 @@ internal fun AddDownloadDialog(
     var options by remember(initialText) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var showOptions by remember(initialText) { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
+
+    // Live "save to" preview: shows the resolved category dir, or the base
+    // dir when nothing classifies — hidden for explicit dir / disabled rules.
+    val categoryPreview =
+        remember(text, options, categorySpec, baseDir) {
+            if (!categorySpec.enabled || !options["dir"].isNullOrBlank()) {
+                null
+            } else {
+                val urls = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+                com.slipstream.model.FileCategories
+                    .resolveDir(
+                        com.slipstream.model.FileCategories
+                            .addCandidates(urls, options),
+                        categorySpec.categories,
+                        baseDir,
+                    ) ?: baseDir
+            }
+        }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -58,6 +78,7 @@ internal fun AddDownloadDialog(
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                categoryPreview?.let { DetailRow(stringResource(R.string.detail_dir), it) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = {
                         clipboard.getText()?.text?.let { text = it }
@@ -133,7 +154,12 @@ internal fun DownloadDetailDialog(
                     stringResource(R.string.detail_progress),
                     "${formatBytes(download.completedLength)} / ${formatBytes(download.totalLength)}",
                 )
-                if (download.downloadSpeed > 0) DetailRow(stringResource(R.string.detail_speed), "↓ ${formatSpeed(download.downloadSpeed)}")
+                if (download.downloadSpeed > 0) {
+                    DetailRow(
+                        stringResource(R.string.detail_speed),
+                        "↓ ${formatSpeed(download.downloadSpeed)}",
+                    )
+                }
                 DetailRow(stringResource(R.string.detail_dir), download.dir)
                 download.errorMessage?.let { DetailRow(stringResource(R.string.detail_error), it) }
                 when {
@@ -147,7 +173,10 @@ internal fun DownloadDetailDialog(
                         }
                 }
                 if (download.files.size > 1) {
-                    Text(stringResource(R.string.detail_files, download.files.size), style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        stringResource(R.string.detail_files, download.files.size),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
                     download.files.take(8).forEach { f ->
                         Row(
                             Modifier

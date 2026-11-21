@@ -140,16 +140,19 @@ class MainActivity : ComponentActivity() {
                                 Screen.List ->
                                     DownloadScreen(
                                         engine = engine,
+                                        repo = settingsRepo,
                                         vm = vm,
                                         externalAdd = pendingAddUrls,
                                         onExternalAddHandled = { pendingAddUrls = null },
                                         onOpenDrawer = { drawerScope.launch { drawerState.open() } },
                                         onOpenLog = { screen = Screen.Log },
                                     )
+
                                 Screen.Settings -> {
                                     BackHandler { screen = Screen.List }
-                                    SettingsScreen(settingsRepo) { screen = Screen.List }
+                                    SettingsScreen(repo = settingsRepo, engine = engine) { screen = Screen.List }
                                 }
+
                                 Screen.Log -> {
                                     BackHandler { screen = Screen.List }
                                     LogScreen(engine)
@@ -186,6 +189,7 @@ class MainActivity : ComponentActivity() {
         when (intent.action) {
             Intent.ACTION_VIEW ->
                 intent.dataString?.let { url -> pendingAddUrls = listOf(url) }
+
             Intent.ACTION_SEND ->
                 intent
                     .getStringExtra(Intent.EXTRA_TEXT)

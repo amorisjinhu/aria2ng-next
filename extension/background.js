@@ -143,7 +143,7 @@ chrome.downloads.onDeterminingFilename.addListener(async (item) => {
 
   try {
     await chrome.downloads.pause(item.id);
-  } catch (_) {}
+  } catch (_) { }
 
   const res = await submit(item.url, {
     finalUrl: item.finalUrl && item.finalUrl !== item.url ? item.finalUrl : undefined,
@@ -157,7 +157,7 @@ chrome.downloads.onDeterminingFilename.addListener(async (item) => {
   const resume = async () => {
     try {
       await chrome.downloads.resume(item.id);
-    } catch (_) {}
+    } catch (_) { }
   };
 
   if (res.action === "accepted" || res.action === "added") {
@@ -165,7 +165,7 @@ chrome.downloads.onDeterminingFilename.addListener(async (item) => {
     try {
       await chrome.downloads.cancel(item.id);
       await chrome.downloads.erase({ id: item.id });
-    } catch (_) {}
+    } catch (_) { }
     notify("aria2ng-next", chrome.i18n.getMessage("sentConfirm") || "Sent — confirm in the app");
   } else if (res.action === "cancelled") {
     // Declined in the app = hand the download BACK to the browser, not delete
@@ -178,7 +178,7 @@ chrome.downloads.onDeterminingFilename.addListener(async (item) => {
     notify(
       "aria2ng-next",
       (chrome.i18n.getMessage("fallbackNote") || "App unreachable — browser kept the download") +
-        (res.reason ? ` (${res.reason})` : ""),
+      (res.reason ? ` (${res.reason})` : ""),
     );
   }
 });

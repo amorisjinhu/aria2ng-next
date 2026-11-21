@@ -158,6 +158,91 @@
     <string name="license_label">许可</string>
     <string name="license_engine">GPLv2+（引擎）— 见 assets/NOTICE.txt</string>
 
+    <!-- Task scopes -->
+    <string name="scope_all">全部</string>
+    <string name="scope_progress">进行中</string>
+    <string name="scope_failed">失败</string>
+    <string name="scope_completed">已完成</string>
+    <string name="scope_empty_progress">没有进行中的下载</string>
+    <string name="scope_empty_failed">没有失败的下载</string>
+    <string name="scope_empty_completed">没有已完成的下载</string>
+
+    <!-- Settings tabs -->
+    <string name="tab_general">通用</string>
+    <string name="tab_downloads">下载</string>
+    <string name="tab_bt">BitTorrent</string>
+    <string name="tab_network">网络</string>
+    <string name="tab_ext">扩展</string>
+    <string name="tab_advanced">高级</string>
+    <string name="cd_back">返回</string>
+    <string name="app_section">应用</string>
+    <string name="set_sub_general">主题、关于与引擎重启</string>
+    <string name="set_sub_downloads">目录、限速、分类与下载选项</string>
+    <string name="set_sub_bt">做种、监听端口、Tracker 与节点发现</string>
+    <string name="set_sub_network">证书、代理、超时与 User-Agent</string>
+    <string name="set_sub_ext">浏览器扩展 API 与通知</string>
+    <string name="set_sub_advanced">RPC 与自定义引擎选项</string>
+    <string name="restart_engine">重启引擎</string>
+    <string name="platform">平台</string>
+    <string name="platform_value">Android %1$s（API %2$d）</string>
+    <string name="save">保存</string>
+
+    <!-- Typed engine options -->
+    <string name="blank_engine_default">留空 = 引擎默认</string>
+    <string name="opt_number_invalid">需为非负数值</string>
+    <string name="tri_default">默认</string>
+    <string name="tri_on">开</string>
+    <string name="tri_off">关</string>
+    <string name="opt_max_concurrent">并行下载数</string>
+    <string name="opt_split">分段数 (-s)</string>
+    <string name="opt_max_connections">单服务器连接数 (-x)</string>
+    <string name="opt_max_tries">最大重试次数</string>
+    <string name="opt_retry_wait">重试间隔 (秒)</string>
+    <string name="opt_file_allocation">文件预分配</string>
+    <string name="opt_seed_ratio">分享率</string>
+    <string name="opt_seed_time">做种时长 (分钟)</string>
+    <string name="opt_bt_max_peers">最大节点数</string>
+    <string name="opt_bt_listen_port">BT 监听端口</string>
+    <string name="opt_bt_tracker">附加 Tracker</string>
+    <string name="opt_bt_tracker_sub">每行一条；留空 = 引擎默认</string>
+    <string name="opt_enable_dht">DHT</string>
+    <string name="opt_enable_pex">节点交换 (PEX)</string>
+    <string name="opt_enable_lpd">本地节点发现 (LPD)</string>
+    <string name="opt_all_proxy">代理 (all-proxy)</string>
+    <string name="opt_connect_timeout">连接超时 (秒)</string>
+    <string name="opt_timeout">超时 (秒)</string>
+    <string name="opt_user_agent">User-Agent</string>
+
+    <!-- File categories -->
+    <string name="cat_enabled">按类型分类下载</string>
+    <string name="cat_enabled_sub">新下载按分类进入子目录；手动指定目录优先</string>
+    <string name="cat_manage">管理分类</string>
+    <string name="cat_count">%1$d 条分类</string>
+    <string name="cat_summary">%1$d 个扩展名 · %2$d 条 URL 规则</string>
+    <string name="cat_add">添加</string>
+    <string name="cat_reset">恢复默认</string>
+    <string name="cat_reset_confirm">再次点击确认</string>
+    <string name="cat_delete">删除</string>
+    <string name="cat_back">返回列表</string>
+    <string name="cat_label">名称</string>
+    <string name="cat_ext_hint">扩展名（逗号分隔）</string>
+    <string name="cat_url_hint">URL 规则（每行一条）</string>
+    <string name="cat_dir_label">目录</string>
+    <string name="cat_dir_mode_rel">相对目录</string>
+    <string name="cat_dir_mode_abs">绝对路径</string>
+    <string name="cat_mode_wildcard">通配符</string>
+    <string name="cat_mode_regex">正则</string>
+    <string name="cat_videos">视频</string>
+    <string name="cat_music">音乐</string>
+    <string name="cat_images">图片</string>
+    <string name="cat_documents">文档</string>
+    <string name="cat_archives">压缩包</string>
+    <string name="cat_programs">程序</string>
+    <string name="cat_err_basedir">下载目录必须是绝对路径</string>
+    <string name="cat_err_dir">第 %1$d 条分类：目录无效（相对目录不能以 / 开头或含 ..；绝对路径须以 / 开头）</string>
+    <string name="cat_err_regex">第 %1$d 条分类第 %2$d 行：正则无效</string>
+    <string name="cat_err_toolong">第 %1$d 条分类第 %2$d 行：规则超过 512 字符</string>
+
     <!-- Engine event notifications -->
     <string name="channel_engine">下载引擎</string>
     <string name="channel_events">下载事件</string>

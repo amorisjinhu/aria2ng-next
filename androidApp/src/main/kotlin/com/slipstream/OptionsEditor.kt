@@ -554,8 +554,15 @@ private fun OptionKeyPickerDialog(
                     customKey?.let { k ->
                         item {
                             Column(Modifier.fillMaxWidth().clickable { onPick(k) }.padding(vertical = 10.dp)) {
-                                Text(stringResource(R.string.use_custom_key), style = MaterialTheme.typography.bodyLarge)
-                                Text(k, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    stringResource(R.string.use_custom_key),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                                Text(
+                                    k,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
                             HorizontalDivider()
                         }
