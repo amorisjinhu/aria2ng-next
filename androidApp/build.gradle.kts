@@ -52,8 +52,8 @@ android {
             libs.versions.targetSdk
                 .get()
                 .toInt()
-        versionCode = 5
-        versionName = "0.1.4"
+        versionCode = 6
+        versionName = "0.1.5"
         // UTC build stamp for the About page — distinguishes same-version builds.
         // Config-time value: a config-cache hit reuses it, which is fine —
         // unchanged config means the same binary anyway.
