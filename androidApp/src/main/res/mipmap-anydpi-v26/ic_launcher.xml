@@ -1,3 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- adaptive-icon is an API 26 feature: AAPT2 only compiles it from a -v26
+     folder, so the qualifier must stay even though minSdk is 34. The resulting
+     ObsoleteSdkInt false positive is suppressed in androidApp/lint.xml. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />

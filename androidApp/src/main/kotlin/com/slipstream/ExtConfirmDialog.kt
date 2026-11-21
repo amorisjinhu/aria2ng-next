@@ -9,6 +9,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
@@ -24,6 +26,10 @@ internal fun ExtConfirmDialog(
 ) {
     val p = pending.firstOrNull() ?: return
     val ctx = LocalContext.current
+    // The confirm callback runs detached on the engine scope (outlives this
+    // composition); read resources via LocalResources so the error string is
+    // resolved against the live configuration, not a stale LocalContext.
+    val res = LocalResources.current
     AlertDialog(
         onDismissRequest = { engine.dismissExtAdd(p) },
         title = { Text(stringResource(R.string.ext_req_title)) },
@@ -37,7 +43,7 @@ internal fun ExtConfirmDialog(
                 p.referer?.let { DetailRow(stringResource(R.string.ext_req_referer), it) }
                 if (pending.size > 1) {
                     Text(
-                        stringResource(R.string.ext_req_more, pending.size - 1),
+                        pluralStringResource(R.plurals.ext_req_more, pending.size - 1, pending.size - 1),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -54,7 +60,7 @@ internal fun ExtConfirmDialog(
                         Toast
                             .makeText(
                                 ctx,
-                                ctx.getString(R.string.rpc_failed, e.message ?: e.toString()),
+                                res.getString(R.string.rpc_failed, e.message ?: e.toString()),
                                 Toast.LENGTH_LONG,
                             ).show()
                     }

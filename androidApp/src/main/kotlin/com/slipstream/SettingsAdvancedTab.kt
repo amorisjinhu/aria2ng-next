@@ -101,6 +101,14 @@ internal fun SettingsAdvancedTab(draft: SettingsDraft) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OptionsEditor(state = draft.residual, catalog = OptionCatalog.global)
+        // Typed-key entries must not be addable here: mergedOptions lets typed
+        // fields win, so a residual "split" would either lie in the UI (typed
+        // blank → "engine default" shown while the residual value applies) or
+        // be silently dropped (typed set → residual ignored).
+        OptionsEditor(
+            state = draft.residual,
+            catalog = OptionCatalog.global,
+            excludedKeys = SettingsDraft.TYPED_KEYS,
+        )
     }
 }

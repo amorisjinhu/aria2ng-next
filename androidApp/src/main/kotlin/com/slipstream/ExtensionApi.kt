@@ -1,15 +1,16 @@
 package com.slipstream
 
 import com.slipstream.model.Download
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -29,6 +30,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
+import kotlin.coroutines.coroutineContext
 import kotlin.time.Duration.Companion.seconds
 
 /** Settings for the browser-extension API — app-level, NOT part of EngineSpec (no engine restart). */
@@ -103,6 +105,12 @@ class ExtensionApiServer(
     // so a slow-loris herd can't exhaust coroutines/sockets.
     private val connLimit = Semaphore(MAX_CONNECTIONS)
 
+    // Accepted sockets, tracked so stop() can kill handlers parked in blocking
+    // reads — coroutine cancellation alone can't interrupt them.
+    private val clientSockets =
+        java.util.concurrent.ConcurrentHashMap
+            .newKeySet<Socket>()
+
     fun start() {
         acceptJob =
             scope.launch(Dispatchers.IO) {
@@ -133,17 +141,33 @@ class ExtensionApiServer(
                         logger("ext-api listening on ${if (spec.listenAll) "0.0.0.0" else "127.0.0.1"}:${spec.port}")
                         while (isActive) {
                             val s = server.accept()
+                            // Bound the permit wait: a socket parked in the
+                            // queue still holds an fd + coroutine, and an idle
+                            // herd could otherwise starve real clients forever.
+                            s.soTimeout = READ_TIMEOUT_MS
+                            clientSockets += s
                             launch {
-                                connLimit.withPermit {
+                                try {
+                                    if (withTimeoutOrNull(PERMIT_WAIT_MS) { connLimit.acquire() } == null) {
+                                        logger("ext-api: handler slots saturated — dropping connection")
+                                        return@launch
+                                    }
                                     try {
                                         s.use { handle(it) }
-                                    } catch (e: InterruptedIOException) {
-                                        // header/body read timeout — drop silently
-                                    } catch (e: SocketException) {
-                                        // client went away mid-request — normal
-                                    } catch (e: Exception) {
-                                        logger("ext-api: ${e.message}")
+                                    } finally {
+                                        connLimit.release()
                                     }
+                                } catch (e: InterruptedIOException) {
+                                    // header/body read timeout — drop silently
+                                } catch (e: SocketException) {
+                                    // client went away mid-request — normal
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    logger("ext-api: ${e.message}")
+                                } finally {
+                                    clientSockets -= s
+                                    runCatching { s.close() }
                                 }
                             }
                         }
@@ -164,6 +188,10 @@ class ExtensionApiServer(
         // Unblocks a pending accept() — job cancellation alone can't interrupt it
         runCatching { serverSocket?.close() }
         serverSocket = null
+        // Kill in-flight handlers too: their blocking socket reads don't
+        // observe the cancelled job — only closing the fd unsticks them.
+        clientSockets.forEach { runCatching { it.close() } }
+        clientSockets.clear()
     }
 
     private suspend fun handle(s: Socket) {
@@ -252,20 +280,20 @@ class ExtensionApiServer(
             return respond(out, 503, """{"error":"$code"}""")
         }
 
-        when {
-            method == "GET" && path == "/downloads/capabilities" ->
+        when (method) {
+            "GET" if path == "/downloads/capabilities" ->
                 respond(
                     out,
                     200,
                     """{"product":"rayburst","protocolVersion":3}""",
                 )
 
-            method == "GET" && path == "/stat" -> respond(out, 200, statJson().toString())
-            method == "GET" && path == "/tasks" -> respond(out, 200, tasksJson())
-            method == "POST" && path == "/add" -> handleAdd(input, out, headers, deadline)
-            method == "POST" && path == "/pause-all" -> handleAll(out, pause = true)
-            method == "POST" && path == "/resume-all" -> handleAll(out, pause = false)
-            method == "POST" && path.startsWith("/tasks/") -> handleTaskOp(out, path)
+            "GET" if path == "/stat" -> respond(out, 200, statJson().toString())
+            "GET" if path == "/tasks" -> respond(out, 200, tasksJson())
+            "POST" if path == "/add" -> handleAdd(input, out, headers, deadline)
+            "POST" if path == "/pause-all" -> handleAll(out, pause = true)
+            "POST" if path == "/resume-all" -> handleAll(out, pause = false)
+            "POST" if path.startsWith("/tasks/") -> handleTaskOp(out, path)
             else -> respond(out, 404, """{"error":"not-found"}""")
         }
     }
@@ -308,12 +336,22 @@ class ExtensionApiServer(
             val v = o["value"]?.jsonPrimitive?.contentOrNull
             if (!n.isNullOrEmpty() && v != null && !n.hasCrlf() && !v.hasCrlf()) headerLines += "$n: $v"
         }
-        str("cookie")?.takeIf { !it.hasCrlf() }?.let { headerLines += "Cookie: $it" }
+        // Cookies cross a trust boundary twice: they are scoped to `url`
+        // (the engine's first hop), and aria2 forwards custom headers on
+        // EVERY redirect hop — so forward them only when the browser-observed
+        // final hop stays on the same origin. Anything else leaks credentials.
+        val cookieSafe =
+            str("finalUrl")?.let { fu ->
+                val from = originOf(url)
+                val to = originOf(fu)
+                from != null && from == to
+            } ?: true
+        str("cookie")?.takeIf { !it.hasCrlf() && cookieSafe }?.let { headerLines += "Cookie: $it" }
 
         val opts = mutableMapOf<String, String>()
         if (headerLines.isNotEmpty()) opts["header"] = headerLines.joinToString("\r\n")
-        str("userAgent")?.let { opts["user-agent"] = it }
-        str("referer")?.let { opts["referer"] = it }
+        str("userAgent")?.takeIf { !it.hasCrlf() }?.let { opts["user-agent"] = it }
+        str("referer")?.takeIf { !it.hasCrlf() }?.let { opts["referer"] = it }
         val filename = str("filename")?.let(::sanitizeFilename)
         // Only a browser-observed name may force `out` — a "suggested" hint must
         // not override the server's Content-Disposition (Rayburst precedence).
@@ -368,6 +406,11 @@ class ExtensionApiServer(
         if (engine.extPending.value.size >= EngineProcess.MAX_EXT_PENDING) {
             return respond(out, 429, """{"error":"queue-full"}""")
         }
+        // This handler may be a zombie: updateExtApi/stop cancels the accept
+        // tree but blocking reads can't see it — check right before the item
+        // becomes user-confirmable, or a stale request would park in the NEW
+        // queue and double-download after the browser already fell back.
+        coroutineContext.ensureActive()
         engine.enqueueExtAdd(pending)
         // Query strings can carry credentials — keep them out of the log.
         logger(
@@ -410,6 +453,21 @@ class ExtensionApiServer(
     }
 
     private fun String.hasCrlf(): Boolean = any { it == '\r' || it == '\n' }
+
+    /** scheme://host:port with default-port normalization — null for non-hierarchical URLs. */
+    private fun originOf(url: String): String? =
+        runCatching {
+            val u = java.net.URI(url)
+            val scheme = u.scheme?.lowercase() ?: return null
+            val host = u.host?.lowercase() ?: return null
+            val port =
+                when {
+                    u.port >= 0 -> u.port
+                    scheme == "https" -> 443
+                    else -> 80
+                }
+            "$scheme://$host:$port"
+        }.getOrNull()
 
     /**
      * aria2.probe(uri, options) — first byte with the request's own options.
@@ -649,7 +707,14 @@ class ExtensionApiServer(
         private const val MAX_CONNECTIONS = 8
         private const val READ_TIMEOUT_MS = 30_000
         private const val REQUEST_DEADLINE_S = 30L
-        private const val CONFIRM_TIMEOUT_MS = 120_000L
+        private const val PERMIT_WAIT_MS = 5_000L
+
+        // Worst-case server budget must stay BELOW the extension's 130 s
+        // client deadline: VERIFY(8s) + CONFIRM + GRACE(10s). At 120 s the sum
+        // (138 s) outlived the client — the browser would resume its copy in
+        // the tail window while a claimed confirm still lands here: a double
+        // download. 8 + 110 + 10 = 128 < 130.
+        private const val CONFIRM_TIMEOUT_MS = 110_000L
         private const val CONFIRM_GRACE_MS = 10_000L
         private const val VERIFY_TIMEOUT_MS = 8_000L // Rayburst's probe budget
         private const val BIND_RETRIES = 20

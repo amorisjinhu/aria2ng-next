@@ -45,6 +45,14 @@ async function cookiesFor(url) {
   }
 }
 
+function sameOrigin(a, b) {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch (_) {
+    return false;
+  }
+}
+
 /**
  * POST /add → resolves to the parsed body on HTTP 200
  * ({action:"accepted"|"added"|"cancelled"|"fallback"}), or
@@ -69,13 +77,20 @@ async function submit(url, ctx = {}) {
     mime: ctx.mime,
     size: ctx.size,
   };
-  const cookie = await cookiesFor(ctx.finalUrl || url);
-  if (cookie) body.cookie = cookie;
+  // Cookies must be scoped to `url` — the URL the engine actually contacts
+  // first. Reading them for finalUrl would send that host's credentials to
+  // THIS host (a cross-origin redirect target's cookies landing in the
+  // redirecting server's logs). Residual limit: aria2 sends custom headers
+  // on every redirect hop, so when the browser already saw a cross-origin
+  // finalUrl, forward NO cookies at all — any cookie would leak across.
+  const cookie = await cookiesFor(url);
+  if (cookie && (!ctx.finalUrl || sameOrigin(url, ctx.finalUrl))) body.cookie = cookie;
   for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];
 
-  // Client-side deadline: the app holds ack:"final" up to 120 s, but a dozing
-  // phone can drop TCP silently (no RST) — without this, fetch hangs forever
-  // and the browser download stays paused indefinitely. 130 s > app budget,
+  // Client-side deadline: the app's worst-case ack:"final" budget is 128 s
+  // (8 s probe + 110 s confirm + 10 s grace), but a dozing phone can drop
+  // TCP silently (no RST) — without this, fetch hangs forever and the
+  // browser download stays paused indefinitely. 130 s > app budget,
   // then fall back so the browser keeps the download.
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 130_000);

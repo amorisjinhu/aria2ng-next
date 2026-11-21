@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
@@ -59,7 +60,14 @@ internal fun SettingsDownloadsTab(draft: SettingsDraft) {
                 Text(stringResource(R.string.browse_dir))
             }
             TextButton(onClick = {
-                draft.dir = "/storage/emulated/0/Download"
+                // Current user's public Download dir — user 0 is wrong on
+                // secondary users and work profiles.
+                draft.dir =
+                    java.io
+                        .File(
+                            android.os.Environment.getExternalStorageDirectory(),
+                            "Download",
+                        ).absolutePath
                 if (!android.os.Environment.isExternalStorageManager()) openAllFilesAccess(ctx)
             }) { Text(stringResource(R.string.use_public_download)) }
             if (isPublicDir && !storageGranted) {
@@ -176,7 +184,7 @@ internal fun SettingsDownloadsTab(draft: SettingsDraft) {
         if (draft.categoryEnabled) {
             SettingLink(
                 stringResource(R.string.cat_manage),
-                stringResource(R.string.cat_count, draft.categories.size),
+                pluralStringResource(R.plurals.cat_count, draft.categories.size, draft.categories.size),
             ) { showManager = true }
             draft.categoryError?.let { Text(categoryErrorText(it), color = MaterialTheme.colorScheme.error) }
         }

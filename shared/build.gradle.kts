@@ -6,7 +6,7 @@ plugins {
 
 kotlin {
     jvmToolchain(21)
-    androidLibrary {
+    android {
         namespace = "com.slipstream.shared"
         compileSdk =
             libs.versions.compileSdk
@@ -27,9 +27,10 @@ kotlin {
             api(libs.kotlinx.serialization.json)
             api(libs.kotlinx.coroutines.core)
         }
-        // Pure-logic unit tests live in androidApp/src/test: the AGP KMP library
-        // plugin wires no host-test execution task here, so commonTest would
-        // compile but never run. androidApp's test classpath includes shared.
+        // Pure-logic unit tests live in androidApp/src/test (its test classpath
+        // includes shared). This module has not opted into host tests, so the
+        // auto-created commonTest source set is wired to no compilation; the AGP
+        // KMP plugin does support host tests via an explicit withHostTest opt-in.
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
         }

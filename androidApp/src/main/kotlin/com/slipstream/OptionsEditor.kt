@@ -468,12 +468,15 @@ fun rememberOptionsEditorState(initial: Map<String, String>) = remember { Option
 /**
  * Key-driven option editor: pick a key from the aria2 catalog, then fill in
  * only the value. Used both inside dialogs (per-download) and inline (settings).
+ * [excludedKeys] are hidden from both the picker and free-form entry — e.g.
+ * settings typed fields, whose residual copy would silently lose the merge.
  */
 @Composable
 fun OptionsEditor(
     state: OptionsEditorState,
     catalog: List<OptionCatalog.Spec>,
     modifier: Modifier = Modifier,
+    excludedKeys: Set<String> = emptySet(),
 ) {
     var showPicker by remember { mutableStateOf(false) }
 
@@ -503,6 +506,7 @@ fun OptionsEditor(
         OptionKeyPickerDialog(
             catalog = catalog,
             existing = state.entries.map { it.first }.toSet(),
+            excludedKeys = excludedKeys,
             onDismiss = { showPicker = false },
             onPick = { key ->
                 state.add(key)
@@ -516,6 +520,7 @@ fun OptionsEditor(
 private fun OptionKeyPickerDialog(
     catalog: List<OptionCatalog.Spec>,
     existing: Set<String>,
+    excludedKeys: Set<String>,
     onDismiss: () -> Unit,
     onPick: (String) -> Unit,
 ) {
@@ -523,6 +528,7 @@ private fun OptionKeyPickerDialog(
     val filtered =
         catalog.filter {
             it.key !in existing &&
+                it.key !in excludedKeys &&
                 (query.isBlank() || it.key.contains(query, true) || it.label?.contains(query, true) == true)
         }
     val customKey =
@@ -535,7 +541,8 @@ private fun OptionKeyPickerDialog(
                 it.isNotEmpty() &&
                     it.first().isLetterOrDigit() &&
                     it.all { c -> c.isLetterOrDigit() || c == '-' } &&
-                    it !in existing
+                    it !in existing &&
+                    it !in excludedKeys
             }
 
     AlertDialog(

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- False positive for adaptive icons: <adaptive-icon> is an API 26 feature
+         that AAPT2 only compiles from a -v26 folder, so the qualifier must stay
+         even though minSdk is 34. ObsoleteSdkInt's "merge into mipmap-anydpi"
+         advice drops the resource at link time. Ignore it for this folder only. -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>

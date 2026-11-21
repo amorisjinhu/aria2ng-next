@@ -3,10 +3,10 @@ package com.slipstream
 import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.CreationExtras
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.slipstream.model.Download
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -190,7 +190,10 @@ class DownloadViewModel(
                         engine.spec.dir,
                     )?.let { options = options + ("dir" to it) }
             }
-            engine.manager.add(urls, options.takeIf { it.isNotEmpty() })
+            val gid = engine.manager.add(urls, options.takeIf { it.isNotEmpty() })
+            // Keep the request options for the day this task lands in history —
+            // a persisted retry needs them (credentials stripped at the store).
+            engine.historyStore.rememberOptions(gid, options)
             // Close only on success — a failed add must not eat the draft.
             _addDialogText.value = null
         }
@@ -242,6 +245,8 @@ class DownloadViewModel(
     ) {
         rpcOp {
             engine.manager.setOptions(gid, map)
+            // changeOption merges — so does the recorded set for a future retry.
+            engine.historyStore.rememberOptions(gid, map)
             _optionsEdit.value = null // keep the editor open on failure
         }
     }
@@ -256,7 +261,17 @@ class DownloadViewModel(
             }
             val opts =
                 if (d.persisted) {
-                    null
+                    // Records carry add-time options minus credential keys —
+                    // referer/out/dir replay, cookies don't. Records from
+                    // before this feature have none: restore at least the
+                    // target dir and warn that request context can't replay.
+                    if (d.options.isEmpty()) {
+                        _events.emit(getApplication<Application>().getString(R.string.retry_no_options))
+                    }
+                    buildMap {
+                        putAll(d.options)
+                        if (d.dir.isNotBlank()) put("dir", d.dir)
+                    }.takeIf { it.isNotEmpty() }
                 } else {
                     runCatching { engine.manager.getOption(d.gid) }.getOrNull()
                 }
@@ -275,7 +290,10 @@ class DownloadViewModel(
                 }
             }
             engine.evictHistory(d.gid)
-            engine.manager.add(uris, opts)
+            val newGid = engine.manager.add(uris, opts)
+            // Carry the options onto the NEW gid — the retried task's own
+            // history record will need them for a future persisted retry.
+            opts?.let { engine.historyStore.rememberOptions(newGid, it) }
         }
     }
 
@@ -314,10 +332,18 @@ class DownloadViewModel(
                 if (withFiles && stopped) fileProblems += deleteDownloadFiles(d)
             }
             if (failed > 0) {
-                _events.emit(getApplication<Application>().getString(R.string.del_partial, failed))
+                _events.emit(
+                    getApplication<Application>().resources.getQuantityString(R.plurals.del_partial, failed, failed),
+                )
             }
             if (fileProblems > 0) {
-                _events.emit(getApplication<Application>().getString(R.string.del_files_skipped, fileProblems))
+                _events.emit(
+                    getApplication<Application>().resources.getQuantityString(
+                        R.plurals.del_files_skipped,
+                        fileProblems,
+                        fileProblems,
+                    ),
+                )
             }
         }
         _selected.value = emptySet()
@@ -327,17 +353,14 @@ class DownloadViewModel(
     companion object {
         private const val MAX_TORRENT_BYTES = 10 * 1024 * 1024
 
-        // Hand-rolled factory: the viewModelFactory DSL lives in lifecycle-viewmodel-ktx,
-        // which this app doesn't depend on — the core Factory API is enough.
+        // Standard factory DSL (lifecycle-viewmodel core; no KTX artifact needed).
+        // The initializer's return type registers DownloadViewModel and avoids the
+        // unchecked cast a hand-rolled Factory.create would require.
         val Factory: ViewModelProvider.Factory =
-            object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(
-                    modelClass: Class<T>,
-                    extras: CreationExtras,
-                ): T {
-                    val app = extras[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
-                    return DownloadViewModel(EngineProcess.get(app), app) as T
+            viewModelFactory {
+                initializer {
+                    val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
+                    DownloadViewModel(EngineProcess.get(app), app)
                 }
             }
     }

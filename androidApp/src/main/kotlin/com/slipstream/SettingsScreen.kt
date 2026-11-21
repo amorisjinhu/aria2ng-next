@@ -48,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -91,6 +92,9 @@ fun SettingsScreen(
     val catSpec by repo.categorySpec.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
+    // Save runs in a coroutine; resolve the error template via LocalResources
+    // so it tracks configuration changes (LocalContext.getString does not).
+    val res = LocalResources.current
 
     val s = spec ?: return // first DataStore emission hasn't arrived
     val es = extSpec ?: return
@@ -186,7 +190,7 @@ fun SettingsScreen(
                                     android.widget.Toast
                                         .makeText(
                                             ctx,
-                                            ctx.getString(R.string.save_failed, e.message ?: e.toString()),
+                                            res.getString(R.string.save_failed, e.message ?: e.toString()),
                                             android.widget.Toast.LENGTH_LONG,
                                         ).show()
                                 }

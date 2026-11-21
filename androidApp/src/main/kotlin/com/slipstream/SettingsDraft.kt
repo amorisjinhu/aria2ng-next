@@ -291,7 +291,7 @@ class SettingsDraft internal constructor(
             )
 
         /** aria2 keys with dedicated controls — everything else stays residual. */
-        private val TYPED_KEYS =
+        internal val TYPED_KEYS =
             setOf(
                 "max-concurrent-downloads",
                 "split",

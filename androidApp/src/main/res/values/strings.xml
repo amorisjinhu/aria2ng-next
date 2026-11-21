@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">aria2ng-next</string>
 
     <!-- Navigation / chrome -->
     <string name="cd_menu">Open menu</string>
     <string name="cd_add">Add download</string>
-    <string name="cd_engine_toggle">Start or stop engine</string>
     <string name="empty_list_hint">No downloads. Tap + to add one.</string>
     <string name="settings">Settings</string>
     <string name="engine_log">Engine log</string>
@@ -24,14 +23,17 @@
     <string name="cd_pause">Pause</string>
     <string name="cd_resume">Resume</string>
     <string name="cd_remove">Remove</string>
-    <string name="cd_clear">Clear result</string>
     <string name="rpc_failed">RPC error: %1$s</string>
 
     <!-- Selection / batch delete -->
-    <string name="sel_count">%1$d selected</string>
+    <!-- "selected" is invariant across counts — no plural form needed. -->
+    <string name="sel_count" tools:ignore="PluralsCandidate">%1$d selected</string>
     <string name="sel_all">Select all</string>
     <string name="sel_exit">Exit selection</string>
-    <string name="del_title">Delete %1$d task(s)</string>
+    <plurals name="del_title">
+        <item quantity="one">Delete %1$d task</item>
+        <item quantity="other">Delete %1$d tasks</item>
+    </plurals>
     <string name="del_text">Also delete the downloaded files from storage?</string>
     <string name="del_records_only">Records only</string>
     <string name="del_with_files">Delete files too</string>
@@ -42,12 +44,19 @@
     <string name="file_missing">File not found on storage</string>
     <string name="open_failed">Can\'t open: this location isn\'t shareable</string>
     <string name="sha_failed">Verification failed: file unreadable</string>
-    <string name="del_partial">%1$d item(s) still active — files kept</string>
-    <string name="del_files_skipped">%1$d file(s) kept — missing or size differs from the record (may belong to another download)</string>
+    <plurals name="del_partial">
+        <item quantity="one">%1$d item still active — files kept</item>
+        <item quantity="other">%1$d items still active — files kept</item>
+    </plurals>
+    <plurals name="del_files_skipped">
+        <item quantity="one">%1$d file kept — missing or size differs from the record (may belong to another download)</item>
+        <item quantity="other">%1$d files kept — missing or size differs from the record (may belong to another download)</item>
+    </plurals>
     <string name="retry">Retry</string>
     <string name="cd_retry">Retry</string>
     <string name="retry_no_source">Can\'t retry: no source URI stored</string>
     <string name="retry_remove_failed">Can\'t retry: removing the original task failed</string>
+    <string name="retry_no_options">Retrying without saved request options — cookies/credentials are not restored</string>
     <string name="torrent_unreadable">Can\'t read the torrent file</string>
     <string name="torrent_too_large">Torrent file too large (over 10 MB)</string>
     <string name="computing">computing %1$d%%…</string>
@@ -75,7 +84,8 @@
     <string name="detail_files">Files (%1$d)</string>
     <string name="edit_options">Edit options</string>
     <string name="close">Close</string>
-    <string name="files_more">… %1$d more</string>
+    <!-- "more" is invariant across counts — no plural form needed. -->
+    <string name="files_more" tools:ignore="PluralsCandidate">… %1$d more</string>
     <string name="options_dialog_prefix">Options: %1$s</string>
     <string name="options_new">Options for new download</string>
     <string name="options_live_hint">Live-editable on active downloads</string>
@@ -124,7 +134,6 @@
     <string name="save_restart">Save &amp; restart engine</string>
 
     <!-- Browser extension API -->
-    <string name="ext_section">Browser extension</string>
     <string name="ext_enabled">Extension API</string>
     <string name="ext_enabled_sub">Companion extensions POST downloads to this port with the token below; every request asks for your confirmation</string>
     <string name="ext_port">Extension API port</string>
@@ -134,8 +143,14 @@
     <string name="ext_req_title">Download request</string>
     <string name="ext_req_name">File</string>
     <string name="ext_req_referer">Referer</string>
-    <string name="ext_req_more">… %1$d more request(s) queued</string>
-    <string name="ext_req_notif">%1$d download request(s) waiting — first: %2$s</string>
+    <plurals name="ext_req_more">
+        <item quantity="one">… %1$d more request queued</item>
+        <item quantity="other">… %1$d more requests queued</item>
+    </plurals>
+    <plurals name="ext_req_notif">
+        <item quantity="one">%1$d download request waiting — first: %2$s</item>
+        <item quantity="other">%1$d download requests waiting — first: %2$s</item>
+    </plurals>
     <string name="ext_req_decline">Decline</string>
     <string name="ext_req_accept">Download</string>
     <string name="ext_notif_alerts">Notification alerts</string>
@@ -216,8 +231,12 @@
     <string name="cat_enabled">Categorize by file type</string>
     <string name="cat_enabled_sub">Route new downloads into per-category folders; an explicit directory always wins</string>
     <string name="cat_manage">Manage categories</string>
-    <string name="cat_count">%1$d categories</string>
-    <string name="cat_summary">%1$d ext · %2$d url</string>
+    <plurals name="cat_count">
+        <item quantity="one">%1$d category</item>
+        <item quantity="other">%1$d categories</item>
+    </plurals>
+    <!-- Two independent counts with invariant abbreviations — not a single plural. -->
+    <string name="cat_summary" tools:ignore="PluralsCandidate">%1$d ext · %2$d url</string>
     <string name="cat_add">Add</string>
     <string name="cat_reset">Reset to defaults</string>
     <string name="cat_reset_confirm">Tap again to confirm</string>

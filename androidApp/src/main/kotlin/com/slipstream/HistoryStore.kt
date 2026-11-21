@@ -37,6 +37,10 @@ class HistoryStore(
     private val dispatcher = Dispatchers.IO.limitedParallelism(1)
     private val tombstones = LinkedHashSet<String>()
 
+    // Add-time options per live gid, consulted when a stopped entry folds
+    // into history. Only touched on [dispatcher]; capped like the store.
+    private val optionsByGid = LinkedHashMap<String, Map<String, String>>()
+
     private val _history = MutableStateFlow<List<Download>>(emptyList())
     val history: StateFlow<List<Download>> = _history.asStateFlow()
 
@@ -55,6 +59,28 @@ class HistoryStore(
                 .map { it.copy(persisted = true) }
         }.getOrDefault(emptyList())
 
+    /**
+     * Records the request options a live gid was added with, so its eventual
+     * persisted record can replay them on retry. Callers may pass the raw
+     * option map — credential-bearing keys (header lines carry cookies, the
+     * passwd/private-key family holds secrets) are stripped here: history.json
+     * is an unencrypted file and credentials must never sit at rest in it.
+     * Repeat calls merge (aria2.changeOption-style: new keys win).
+     */
+    fun rememberOptions(
+        gid: String,
+        opts: Map<String, String>,
+    ) {
+        val clean = opts.filterKeys { !SECRET_OPTION.containsMatchIn(it) }
+        if (clean.isEmpty()) return
+        scope.launch(dispatcher) {
+            optionsByGid[gid] = (optionsByGid[gid] ?: emptyMap()) + clean
+            while (optionsByGid.size > MAX_ENTRIES) {
+                optionsByGid.remove(optionsByGid.keys.first())
+            }
+        }
+    }
+
     /** Fold newly-stopped live entries into the store; newest first, capped. */
     fun merge(live: List<Download>) {
         val stopped =
@@ -67,7 +93,7 @@ class HistoryStore(
                 (stopped.filter { it.gid !in tombstones } + _history.value)
                     .distinctBy { it.gid }
                     .take(MAX_ENTRIES)
-                    .map { it.copy(persisted = true) }
+                    .map { it.copy(persisted = true, options = optionsByGid[it.gid] ?: it.options) }
             if (merged.map { it.gid } != _history.value.map { it.gid }) {
                 _history.value = merged
                 persist(merged)
@@ -79,6 +105,9 @@ class HistoryStore(
         scope.launch(dispatcher) {
             tombstones.add(gid)
             while (tombstones.size > MAX_ENTRIES) tombstones.remove(tombstones.first())
+            // A stale sidecar entry must not ride onto a FUTURE download that
+            // happens to reuse this gid (aria2 recycles counters on restart).
+            optionsByGid.remove(gid)
             val next = _history.value.filterNot { it.gid == gid }
             if (next.size != _history.value.size) {
                 _history.value = next
@@ -108,5 +137,8 @@ class HistoryStore(
 
     private companion object {
         const val MAX_ENTRIES = 300
+
+        // Option keys whose values are credentials — never written to history.json.
+        private val SECRET_OPTION = Regex("""header|passwd|private-key|secret""", RegexOption.IGNORE_CASE)
     }
 }

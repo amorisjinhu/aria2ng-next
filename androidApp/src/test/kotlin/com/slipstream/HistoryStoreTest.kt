@@ -118,4 +118,64 @@ class HistoryStoreTest {
             // Input order wins the cap: the first 300 entries are kept.
             assertEquals("g1", h.first().gid)
         }
+
+    @Test
+    fun rememberedOptionsRideIntoPersistedRecord() =
+        withStore { store, _ ->
+            store.rememberOptions("a", mapOf("referer" to "https://r", "out" to "f.bin"))
+            store.merge(listOf(entry("a")))
+            val h = store.history.first { it.size == 1 }
+            assertEquals(mapOf("referer" to "https://r", "out" to "f.bin"), h.single().options)
+        }
+
+    @Test
+    fun credentialKeysAreNeverPersisted() =
+        withStore { store, _ ->
+            store.rememberOptions(
+                "a",
+                mapOf(
+                    "header" to "Cookie: session=x",
+                    "http-passwd" to "pw",
+                    "private-key" to "k",
+                    "out" to "f",
+                ),
+            )
+            store.merge(listOf(entry("a")))
+            val h = store.history.first { it.size == 1 }
+            assertEquals(mapOf("out" to "f"), h.single().options)
+        }
+
+    @Test
+    fun rememberedOptionsMergeLikeChangeOption() =
+        withStore { store, _ ->
+            store.rememberOptions("a", mapOf("referer" to "https://r", "out" to "f.bin"))
+            store.rememberOptions("a", mapOf("out" to "g.bin", "split" to "4"))
+            store.merge(listOf(entry("a")))
+            val h = store.history.first { it.size == 1 }
+            assertEquals(
+                mapOf("referer" to "https://r", "out" to "g.bin", "split" to "4"),
+                h.single().options,
+            )
+        }
+
+    @Test
+    fun optionsSurviveReload() =
+        withStore { store, dir ->
+            store.rememberOptions("keep", mapOf("referer" to "https://r"))
+            store.merge(listOf(entry("keep")))
+            store.history.first { it.size == 1 }
+            // Wait for the persist op (queued after the flow update) to land.
+            withTimeout(5_000) {
+                val f = File(dir, "history.json")
+                while (!f.isFile || !f.readText().contains("https://r")) delay(20)
+            }
+            val scope2 = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                val reloaded = HistoryStore(dir, scope2)
+                val h = reloaded.history.first { it.isNotEmpty() }
+                assertEquals(mapOf("referer" to "https://r"), h.single().options)
+            } finally {
+                scope2.cancel()
+            }
+        }
 }

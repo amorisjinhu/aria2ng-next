@@ -161,19 +161,13 @@ class EngineService : Service() {
         return START_STICKY
     }
 
-    // API 34 (1-arg) / API 35+ (2-arg): dataSync FGS hits its 6h/24h cap and the
-    // system calls back here — not stopping in time crashes with
+    // Android 15+ enforces the dataSync FGS 6h/24h cap and calls this 2-arg
+    // callback. The 1-arg onTimeout is shortService-only and this service is
+    // dataSync, so it is never invoked here (on API 34 dataSync has no timeout
+    // enforcement at all). Not stopping in time crashes with
     // ForegroundServiceDidNotStopInTimeException. Stop the engine so aria2 can
     // save its session before the process winds down. Tell the USER too: a
     // silent stop mid-download looks like "still downloading" forever.
-    @Suppress("DEPRECATION")
-    override fun onTimeout(startId: Int) {
-        wantRunning = false
-        postTimeoutNotification()
-        engine.stop()
-        stopSelf()
-    }
-
     override fun onTimeout(
         startId: Int,
         fgsType: Int,
@@ -321,8 +315,14 @@ class EngineService : Service() {
                 .Builder(this, EXT_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_download)
                 .setContentTitle(getString(R.string.ext_req_title))
-                .setContentText(getString(R.string.ext_req_notif, list.size, list.first().displayName))
-                .setContentIntent(openAppIntent())
+                .setContentText(
+                    resources.getQuantityString(
+                        R.plurals.ext_req_notif,
+                        list.size,
+                        list.size,
+                        list.first().displayName,
+                    ),
+                ).setContentIntent(openAppIntent())
                 .setCategory(Notification.CATEGORY_ALARM)
                 .setFullScreenIntent(openAppIntent(), true)
                 .addAction(extAction(R.string.ext_req_accept, ACTION_EXT_CONFIRM, list.first().id, 10))

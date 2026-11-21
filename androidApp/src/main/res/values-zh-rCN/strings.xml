@@ -5,7 +5,6 @@
     <!-- Navigation / chrome -->
     <string name="cd_menu">打开菜单</string>
     <string name="cd_add">新建下载</string>
-    <string name="cd_engine_toggle">启动或停止引擎</string>
     <string name="empty_list_hint">还没有下载，点 + 添加</string>
     <string name="settings">设置</string>
     <string name="engine_log">引擎日志</string>
@@ -24,14 +23,15 @@
     <string name="cd_pause">暂停</string>
     <string name="cd_resume">继续</string>
     <string name="cd_remove">移除</string>
-    <string name="cd_clear">清除记录</string>
     <string name="rpc_failed">RPC 错误：%1$s</string>
 
     <!-- Selection / batch delete -->
     <string name="sel_count">已选 %1$d 项</string>
     <string name="sel_all">全选</string>
     <string name="sel_exit">退出选择</string>
-    <string name="del_title">删除 %1$d 项任务</string>
+    <plurals name="del_title">
+        <item quantity="other">删除 %1$d 项任务</item>
+    </plurals>
     <string name="del_text">是否同时删除存储中的文件？</string>
     <string name="del_records_only">仅删除记录</string>
     <string name="del_with_files">连同文件删除</string>
@@ -42,12 +42,17 @@
     <string name="file_missing">存储中找不到该文件</string>
     <string name="open_failed">无法打开：此位置不支持分享</string>
     <string name="sha_failed">校验失败：文件不可读</string>
-    <string name="del_partial">%1$d 项仍存活——已跳过文件删除</string>
-    <string name="del_files_skipped">已保留 %1$d 个文件——不存在或大小与记录不符（可能属于其他下载）</string>
+    <plurals name="del_partial">
+        <item quantity="other">%1$d 项仍存活——已跳过文件删除</item>
+    </plurals>
+    <plurals name="del_files_skipped">
+        <item quantity="other">已保留 %1$d 个文件——不存在或大小与记录不符（可能属于其他下载）</item>
+    </plurals>
     <string name="retry">重试</string>
     <string name="cd_retry">重试</string>
     <string name="retry_no_source">无法重试：未保存下载地址</string>
     <string name="retry_remove_failed">无法重试：原任务移除失败</string>
+    <string name="retry_no_options">正在重试，但没有保存的请求选项——Cookie/凭据不会恢复</string>
     <string name="torrent_unreadable">无法读取种子文件</string>
     <string name="torrent_too_large">种子文件过大（超过 10 MB）</string>
     <string name="computing">计算中 %1$d%%…</string>
@@ -124,7 +129,6 @@
     <string name="save_restart">保存并重启引擎</string>
 
     <!-- Browser extension API -->
-    <string name="ext_section">浏览器扩展</string>
     <string name="ext_enabled">扩展 API</string>
     <string name="ext_enabled_sub">配套扩展用下方令牌向此端口提交下载；每个请求都需要你在应用内确认</string>
     <string name="ext_port">扩展 API 端口</string>
@@ -134,8 +138,12 @@
     <string name="ext_req_title">下载请求</string>
     <string name="ext_req_name">文件</string>
     <string name="ext_req_referer">来源页</string>
-    <string name="ext_req_more">… 队列中还有 %1$d 个请求</string>
-    <string name="ext_req_notif">%1$d 个下载请求待确认 — 首个：%2$s</string>
+    <plurals name="ext_req_more">
+        <item quantity="other">… 队列中还有 %1$d 个请求</item>
+    </plurals>
+    <plurals name="ext_req_notif">
+        <item quantity="other">%1$d 个下载请求待确认 — 首个：%2$s</item>
+    </plurals>
     <string name="ext_req_decline">拒绝</string>
     <string name="ext_req_accept">下载</string>
     <string name="ext_notif_alerts">通知提醒设置</string>
@@ -216,7 +224,9 @@
     <string name="cat_enabled">按类型分类下载</string>
     <string name="cat_enabled_sub">新下载按分类进入子目录；手动指定目录优先</string>
     <string name="cat_manage">管理分类</string>
-    <string name="cat_count">%1$d 条分类</string>
+    <plurals name="cat_count">
+        <item quantity="other">%1$d 条分类</item>
+    </plurals>
     <string name="cat_summary">%1$d 个扩展名 · %2$d 条 URL 规则</string>
     <string name="cat_add">添加</string>
     <string name="cat_reset">恢复默认</string>

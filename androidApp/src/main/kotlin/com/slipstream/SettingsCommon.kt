@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 
 /** Section header — primary-color titleSmall, matching the old screen. */
 @Composable
@@ -78,12 +79,12 @@ internal fun TypedOptionField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
+    modifier: Modifier = Modifier,
     valid: Boolean = true,
     hint: String = stringResource(R.string.blank_engine_default),
     numeric: Boolean = false,
     errorText: String = stringResource(R.string.opt_number_invalid),
     singleLine: Boolean = true,
-    modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
     OutlinedTextField(
         value = value,
@@ -106,7 +107,7 @@ internal fun TypedOptionField(
                 KeyboardOptions.Default
             },
         singleLine = singleLine,
-        modifier = modifier,
+        modifier = modifier.fillMaxWidth(),
     )
 }
 
@@ -136,7 +137,7 @@ internal fun TriStateChips(
 }
 
 /**
- * "primary:Download/x" → "/storage/emulated/0/Download/x"; SD volume UUID →
+ * "primary:Download/x" → "<external storage>/Download/x"; SD volume UUID →
  * "/storage/<UUID>/…". Any other authority (cloud documents etc.) has NO
  * filesystem path — returning a fabricated "/storage/<docId>" would point
  * the engine at garbage, so reject it outright.
@@ -147,7 +148,13 @@ internal fun treeUriToPath(uri: android.net.Uri): String? {
     val volume = parts[0]
     val base =
         when {
-            volume.equals("primary", ignoreCase = true) -> "/storage/emulated/0"
+            // The current user's root, not hardcoded user 0 — secondary users
+            // and work profiles mount external storage at /storage/emulated/<id>.
+            volume.equals("primary", ignoreCase = true) ->
+                android.os.Environment
+                    .getExternalStorageDirectory()
+                    .absolutePath
+
             Regex("[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}").matches(volume) -> "/storage/$volume"
             else -> return null
         }
@@ -197,7 +204,7 @@ internal fun openBgPopupSettings(ctx: android.content.Context) {
         } else {
             android.content.Intent(
                 android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                android.net.Uri.parse("package:${ctx.packageName}"),
+                "package:${ctx.packageName}".toUri(),
             )
         }
     startSettings(ctx, intent)
@@ -214,12 +221,12 @@ internal fun requestBatteryWhitelist(ctx: android.content.Context) {
         if (pm.isIgnoringBatteryOptimizations(ctx.packageName)) {
             android.content.Intent(
                 android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                android.net.Uri.parse("package:${ctx.packageName}"),
+                "package:${ctx.packageName}".toUri(),
             )
         } else {
             android.content.Intent(
                 android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                android.net.Uri.parse("package:${ctx.packageName}"),
+                "package:${ctx.packageName}".toUri(),
             )
         }
     startSettings(ctx, intent)
@@ -231,7 +238,7 @@ internal fun openAllFilesAccess(ctx: android.content.Context) {
         ctx,
         android.content.Intent(
             android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-            android.net.Uri.parse("package:${ctx.packageName}"),
+            "package:${ctx.packageName}".toUri(),
         ),
     )
 }

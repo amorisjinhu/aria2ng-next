@@ -36,6 +36,10 @@ data class Download(
     // True when this entry comes from the on-disk history store, not a live
     // aria2 — the gid no longer exists engine-side, so only file/record ops work.
     val persisted: Boolean = false,
+    // Add-time request options kept on persisted records so a retry can replay
+    // referer/out/dir etc. Credential-bearing keys (header/passwd/…) are
+    // stripped before persisting — see HistoryStore.rememberOptions.
+    val options: Map<String, String> = emptyMap(),
 ) {
     val progress: Float
         get() = if (totalLength > 0) (completedLength.toFloat() / totalLength).coerceIn(0f, 1f) else 0f

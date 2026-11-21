@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -26,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -137,9 +139,12 @@ internal fun DownloadDetailDialog(
 ) {
     val ctx = LocalContext.current
     val clipboard = LocalClipboard.current
+    // Resolved in composition so the async failure callback below stays
+    // configuration-aware (LocalContext.getString is not).
+    val shaFailed = stringResource(R.string.sha_failed)
     val shaScope = rememberCoroutineScope()
     var shaResult by remember { mutableStateOf<String?>(null) }
-    var shaPct by remember { mutableStateOf(-1) } // -1 = idle
+    var shaPct by remember { mutableIntStateOf(-1) } // -1 = idle
 
     // Primary payload: first selected file, else first file, else dir/name guess
     val primaryPath =
@@ -240,7 +245,7 @@ internal fun DownloadDetailDialog(
                                 shaPct = -1
                                 if (shaResult == null) {
                                     Toast
-                                        .makeText(ctx, ctx.getString(R.string.sha_failed), Toast.LENGTH_SHORT)
+                                        .makeText(ctx, shaFailed, Toast.LENGTH_SHORT)
                                         .show()
                                 }
                             }
@@ -283,7 +288,7 @@ internal fun DeleteConfirmDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.del_title, count)) },
+        title = { Text(pluralStringResource(R.plurals.del_title, count, count)) },
         text = { Text(stringResource(R.string.del_text)) },
         confirmButton = {
             FlowRow(

@@ -127,10 +127,14 @@ class EngineProcess private constructor(
     fun updateExtApi(spec: ExtApiSpec) {
         if (spec == extSpec) return
         extSpec = spec
+        // Kill the listener BEFORE draining: once stop() cancels the accept
+        // tree, no handler can pass its pre-enqueue ensureActive — so the
+        // drain below can't miss a stale submission sneaking into the new
+        // queue in the gap. (drain→stop ordering left exactly that window.)
+        extServer?.stop()
         // Stale confirmations must not outlive the listener they arrived on —
         // a browser that already fell back would double-download on confirm.
         drainExtPending("ext api reconfigured")
-        extServer?.stop()
         extServer =
             if (spec.enabled && spec.token.isNotBlank()) {
                 ExtensionApiServer(spec, this, scope, ::appendLog).also { it.start() }
@@ -146,6 +150,9 @@ class EngineProcess private constructor(
         extServer?.stop()
         extServer = null
         extSpec = null
+        // Fail queued waiters too — their browser callers are already past the
+        // client deadline, so a later confirm would double-download.
+        drainExtPending("ext api released")
     }
 
     fun enqueueExtAdd(p: PendingAdd) = _extPending.update { it + p }
@@ -179,6 +186,9 @@ class EngineProcess private constructor(
         }
         _extPending.update { it - p }
         val r = runCatching { manager.add(listOf(p.url), p.options) }
+        // Record the request options against the new gid — a persisted record
+        // can then replay referer/out/dir on retry (credentials never written).
+        r.onSuccess { gid -> historyStore.rememberOptions(gid, p.options) }
         p.verdict.complete(
             r.fold({ AddVerdict.Added(it) }, { AddVerdict.Failed(it.message ?: "add failed") }),
         )
@@ -505,6 +515,9 @@ class EngineProcess private constructor(
         /** Extracted CA bundle location — the default for check-certificate. */
         fun caBundleFile(context: Context): File? = File(context.filesDir, "cacert.pem").takeIf { it.isFile }
 
+        // Process-wide singleton; get() always stores applicationContext, never an
+        // Activity/Service context, so the static reference cannot leak a UI context.
+        @Suppress("StaticFieldLeak")
         @Volatile
         private var instance: EngineProcess? = null
 
