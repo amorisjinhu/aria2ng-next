@@ -7,11 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,6 +31,7 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 class EngineService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val nm get() = getSystemService(NotificationManager::class.java)
     private lateinit var engine: EngineProcess
     private lateinit var repo: SettingsRepo
     private val eventQueue = Channel<JsonObject>(Channel.UNLIMITED)
@@ -78,7 +75,7 @@ class EngineService : Service() {
         scope.launch {
             engine.extPending.collect { list ->
                 if (list.isEmpty()) {
-                    NotificationManagerCompat.from(this@EngineService).cancel(EXT_NOTIFICATION_ID)
+                    nm.cancel(EXT_NOTIFICATION_ID)
                 } else {
                     runCatching { postExtRequestNotification(list) }
                 }
@@ -108,7 +105,7 @@ class EngineService : Service() {
             engine.state.collect { st ->
                 if (wantRunning) {
                     runCatching {
-                        NotificationManagerCompat.from(this@EngineService).notify(NOTIFICATION_ID, buildNotification(st))
+                        nm.notify(NOTIFICATION_ID, buildNotification(st))
                     }
                 }
             }
@@ -188,18 +185,18 @@ class EngineService : Service() {
     }
 
     private fun postTimeoutNotification() {
-        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) return
+        if (!nm.areNotificationsEnabled()) return
         val n =
-            NotificationCompat
+            Notification
                 .Builder(this, EVENT_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
                 .setContentTitle(getString(R.string.app_name))
                 .setContentText(getString(R.string.notif_timeout))
-                .setStyle(NotificationCompat.BigTextStyle().bigText(getString(R.string.notif_timeout)))
+                .setStyle(Notification.BigTextStyle().bigText(getString(R.string.notif_timeout)))
                 .setContentIntent(openAppIntent())
                 .setAutoCancel(true)
                 .build()
-        runCatching { NotificationManagerCompat.from(this).notify(TIMEOUT_NOTIFICATION_ID, n) }
+        runCatching { nm.notify(TIMEOUT_NOTIFICATION_ID, n) }
     }
 
     override fun onDestroy() {
@@ -219,28 +216,17 @@ class EngineService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+    private fun actionIntent(
+        action: String,
+        requestCode: Int,
+    ) = PendingIntent.getService(
+        this,
+        requestCode,
+        Intent(this, EngineService::class.java).setAction(action),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
     private fun buildNotification(state: EngineProcess.State = engine.state.value): Notification {
-        val stop =
-            PendingIntent.getService(
-                this,
-                1,
-                Intent(this, EngineService::class.java).setAction(ACTION_STOP),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-        val pauseAll =
-            PendingIntent.getService(
-                this,
-                2,
-                Intent(this, EngineService::class.java).setAction(ACTION_PAUSE_ALL),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-        val resumeAll =
-            PendingIntent.getService(
-                this,
-                3,
-                Intent(this, EngineService::class.java).setAction(ACTION_RESUME_ALL),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
         val text =
             when (state) {
                 is EngineProcess.State.Running -> getString(R.string.notif_engine_running)
@@ -248,18 +234,26 @@ class EngineService : Service() {
                 is EngineProcess.State.Failed -> getString(R.string.notif_engine_failed, state.reason)
                 EngineProcess.State.Stopped -> getString(R.string.notif_engine_stopped)
             }
-        return NotificationCompat
+        return Notification
             .Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(getString(R.string.app_name) + " engine")
             .setContentText(text)
             .setContentIntent(openAppIntent())
             .setOngoing(true)
-            .addAction(0, getString(R.string.notif_pause_all), pauseAll)
-            .addAction(0, getString(R.string.notif_resume_all), resumeAll)
-            .addAction(0, getString(R.string.notif_stop), stop)
+            .addAction(action(R.string.notif_pause_all, ACTION_PAUSE_ALL, 2))
+            .addAction(action(R.string.notif_resume_all, ACTION_RESUME_ALL, 3))
+            .addAction(action(R.string.notif_stop, ACTION_STOP, 1))
             .build()
     }
+
+    private fun action(
+        titleRes: Int,
+        intentAction: String,
+        requestCode: Int,
+    ) = Notification.Action
+        .Builder(null, getString(titleRes), actionIntent(intentAction, requestCode))
+        .build()
 
     private fun eventLabel(method: String?) =
         getString(
@@ -274,7 +268,7 @@ class EngineService : Service() {
         )
 
     private fun postDownloadEvent(batch: List<JsonObject>) {
-        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) return
+        if (!nm.areNotificationsEnabled()) return
 
         val text =
             if (batch.size == 1) {
@@ -303,7 +297,7 @@ class EngineService : Service() {
             }
 
         val n =
-            NotificationCompat
+            Notification
                 .Builder(this, EVENT_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
                 .setContentTitle(getString(R.string.app_name))
@@ -314,77 +308,73 @@ class EngineService : Service() {
                 .build()
         // One fixed id: each batch replaces the previous post instead of
         // stacking yet another entry in the notification drawer.
-        NotificationManagerCompat.from(this).notify(EVENT_NOTIFICATION_ID, n)
+        nm.notify(EVENT_NOTIFICATION_ID, n)
     }
 
     private fun postExtRequestNotification(list: List<PendingAdd>) {
-        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) return
+        if (!nm.areNotificationsEnabled()) return
+        // A held browser download decays fast — surface like a call:
+        // heads-up banner plus full-screen intent where the OEM
+        // (and API 34+) permits it. Both are best-effort.
         val n =
-            NotificationCompat
+            Notification
                 .Builder(this, EXT_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_download)
                 .setContentTitle(getString(R.string.ext_req_title))
                 .setContentText(getString(R.string.ext_req_notif, list.size, list.first().displayName))
                 .setContentIntent(openAppIntent())
-                // A held browser download decays fast — surface like a call:
-                // heads-up banner plus full-screen intent where the OEM
-                // (and API 34+) permits it. Both are best-effort.
-                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setCategory(Notification.CATEGORY_ALARM)
                 .setFullScreenIntent(openAppIntent(), true)
-                .addAction(
-                    0,
-                    getString(R.string.ext_req_accept),
-                    PendingIntent.getService(
-                        this,
-                        10,
-                        Intent(this, EngineService::class.java)
-                            .setAction(ACTION_EXT_CONFIRM)
-                            .putExtra(EXTRA_PENDING_ID, list.first().id),
-                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                    ),
-                ).addAction(
-                    0,
-                    getString(R.string.ext_req_decline),
-                    PendingIntent.getService(
-                        this,
-                        11,
-                        Intent(this, EngineService::class.java)
-                            .setAction(ACTION_EXT_DECLINE)
-                            .putExtra(EXTRA_PENDING_ID, list.first().id),
-                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                    ),
-                ).setAutoCancel(true)
+                .addAction(extAction(R.string.ext_req_accept, ACTION_EXT_CONFIRM, list.first().id, 10))
+                .addAction(extAction(R.string.ext_req_decline, ACTION_EXT_DECLINE, list.first().id, 11))
+                .setAutoCancel(true)
                 .build()
-        NotificationManagerCompat.from(this).notify(EXT_NOTIFICATION_ID, n)
+        nm.notify(EXT_NOTIFICATION_ID, n)
     }
 
+    private fun extAction(
+        titleRes: Int,
+        intentAction: String,
+        pendingId: Long,
+        requestCode: Int,
+    ) = Notification.Action
+        .Builder(
+            null,
+            getString(titleRes),
+            PendingIntent.getService(
+                this,
+                requestCode,
+                Intent(this, EngineService::class.java)
+                    .setAction(intentAction)
+                    .putExtra(EXTRA_PENDING_ID, pendingId),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            ),
+        ).build()
+
     private fun createChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    getString(R.string.channel_engine),
-                    NotificationManager.IMPORTANCE_LOW,
-                ),
-            )
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    EVENT_CHANNEL_ID,
-                    getString(R.string.channel_events),
-                    NotificationManager.IMPORTANCE_DEFAULT,
-                ),
-            )
-            // Separate channel: IMPORTANCE_HIGH is locked at creation and must
-            // never share a channel with routine engine events.
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    EXT_CHANNEL_ID,
-                    getString(R.string.channel_ext_requests),
-                    NotificationManager.IMPORTANCE_HIGH,
-                ),
-            )
-        }
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.channel_engine),
+                NotificationManager.IMPORTANCE_LOW,
+            ),
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(
+                EVENT_CHANNEL_ID,
+                getString(R.string.channel_events),
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ),
+        )
+        // Separate channel: IMPORTANCE_HIGH is locked at creation and must
+        // never share a channel with routine engine events.
+        nm.createNotificationChannel(
+            NotificationChannel(
+                EXT_CHANNEL_ID,
+                getString(R.string.channel_ext_requests),
+                NotificationManager.IMPORTANCE_HIGH,
+            ),
+        )
     }
 
     companion object {
@@ -406,8 +396,7 @@ class EngineService : Service() {
         const val EXTRA_PENDING_ID = "pending_id"
 
         fun start(context: Context) {
-            ContextCompat.startForegroundService(
-                context,
+            context.startForegroundService(
                 Intent(context, EngineService::class.java).setAction(ACTION_START),
             )
         }

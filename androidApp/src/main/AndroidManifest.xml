@@ -13,7 +13,6 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Public-dir downloads need all-files access on API 30+; granted via system settings page -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <!-- API 30+ package visibility: without this, resolveActivity() for the
          MIUI permission editor always returns null and we silently fall back. -->

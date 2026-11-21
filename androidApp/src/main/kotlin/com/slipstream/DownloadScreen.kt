@@ -1,7 +1,7 @@
 package com.slipstream
 
 import android.Manifest
-import android.os.Build
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -98,12 +98,19 @@ internal fun DownloadScreen(
             uri?.let { vm.addTorrent(it) }
         }
 
-    if (Build.VERSION.SDK_INT >= 33) {
-        val launcher =
-            rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestPermission(),
-            ) {}
-        LaunchedEffect(Unit) { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) }
+    // minSdk 34 ≥ API 33 — POST_NOTIFICATIONS is always a runtime permission.
+    // Only fire the request when it's actually missing; the launcher still
+    // re-registers a result contract every cold start otherwise.
+    val notifPermLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) {}
+    LaunchedEffect(Unit) {
+        if (context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     Scaffold(

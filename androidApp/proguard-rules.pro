@@ -1,8 +1,9 @@
 # App is small; the real win from R8 here is shrinking the kotlinx/ktor deps.
-# Keep our own classes whole so JSON DTOs, Compose entry points and the
-# FileProvider authority can never be obfuscated into breakage.
--keep class com.slipstream.** { *; }
--keepnames class com.slipstream.** { *; }
+# Only @Serializable models must survive whole — generated serializers touch
+# them by name. Manifest components (Activity/Service/FileProvider) and
+# Compose entry points are kept by AGP automatically; the rest of our own
+# code is free to shrink/obfuscate.
+-keep @kotlinx.serialization.Serializable class com.slipstream.** { *; }
 
 # kotlinx.serialization — generated Companion/$serializer lookup (canonical rules)
 -keepattributes *Annotation*, InnerClasses

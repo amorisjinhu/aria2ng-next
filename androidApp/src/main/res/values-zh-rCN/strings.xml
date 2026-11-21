@@ -107,7 +107,6 @@
     <string name="download_dir">下载目录</string>
     <string name="use_public_download">使用公共下载目录</string>
     <string name="storage_warning">⚠ 需要"所有文件访问"权限</string>
-    <string name="storage_warning_legacy">⚠ 需要存储权限</string>
     <string name="check_cert">校验 TLS 证书</string>
     <string name="check_cert_sub">内置 CA 包（assets/cacert.pem）自动生效；无 CA 包时开启会导致全部 HTTPS 下载失败</string>
     <string name="save_failed">保存失败：%1$s</string>

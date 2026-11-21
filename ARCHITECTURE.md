@@ -25,10 +25,11 @@
 └──────────────────────────┬─────────────────────────────────┘
                            │ 单向依赖（Gradle 强制）
 ┌──────────────────────────▼─────────────────────────────────┐
-│ shared/               平台无关核心（commonMain 仅 4 个文件）   │
+│ shared/               平台无关核心（commonMain 仅 5 个文件）   │
 │   rpc/Aria2Client.kt      JSON-RPC 客户端（WS + HTTP 双传输） │
 │   rpc/DownloadManager.kt  下载列表 live view（轮询+事件刷新）  │
 │   model/Download.kt       Download / FileEntry / GlobalStat  │
+│   model/FileCategory.kt   IDM 式文件分类规则（纯函数）          │
 │   engine/EngineSpec.kt    设置 → aria2 命令行映射             │
 └──────────────────────────┬─────────────────────────────────┘
                            │ JSON-RPC（ws:// 或 http://localhost:port/jsonrpc）
@@ -47,24 +48,34 @@
 ```
 slipstream/
 ├── androidApp/src/main/kotlin/com/slipstream/
-│   ├── MainActivity.kt        Activity 壳：抽屉导航/intent 路由/AboutDialog
-│   ├── DownloadViewModel.kt   列表页 UI 状态 + RPC 编排 + Snackbar 事件流
-│   ├── DownloadScreen.kt      列表页 UI（Scaffold/顶栏/FAB/列表）
-│   ├── DownloadCard.kt        卡片 + StatusChip + statusLabel
-│   ├── DownloadDialogs.kt     添加/详情/删除确认对话框
-│   ├── ExtConfirmDialog.kt    ext 队首确认对话框
-│   ├── CommonUi.kt            DetailRow + SpeedGraph
-│   ├── LogScreen.kt           引擎 stdout 日志页
-│   ├── FileOps.kt             openLocalFile / sha256Hex / deleteDownloadFiles
-│   ├── SettingsScreen.kt      设置页（引擎 + 扩展 API + OEM 保活深链）
-│   ├── OptionsEditor.kt       aria2 选项编辑器（含 OptionsEditorDialog）
-│   ├── EngineProcess.kt       引擎进程所有权：启停/teardown/ext 队列门面
-│   ├── EngineService.kt       dataSync 前台服务：生命周期所有者 + 通知
-│   ├── ExtensionApi.kt        内嵌 HTTP 服务（ExtApiSpec/PendingAdd/路由）
-│   ├── SettingsRepo.kt        DataStore 设置仓库 + 首启 token 播种
-│   ├── HistoryStore.kt        已完成记录持久化（history.json）
-│   ├── Format.kt / Theme.kt   字节/速度/ETA 格式化；主题
-├── shared/src/commonMain/kotlin/com/slipstream/   （见上图 4 文件）
+│   ├── MainActivity.kt          Activity 壳：抽屉导航/intent 路由/AboutDialog
+│   ├── DownloadViewModel.kt     列表页 UI 状态 + RPC 编排 + Snackbar 事件流
+│   ├── DownloadScreen.kt        列表页 UI（Scaffold/顶栏/FAB/TaskScope 过滤片/列表）
+│   ├── DownloadCard.kt          卡片 + StatusChip + statusLabel
+│   ├── TaskScope.kt             列表分区（ALL/PROGRESS/FAILED/COMPLETED）+ 选择剪枝
+│   ├── DownloadDialogs.kt       添加/详情/删除确认对话框
+│   ├── ExtConfirmDialog.kt      ext 队首确认对话框
+│   ├── CommonUi.kt              DetailRow + SpeedGraph
+│   ├── LogScreen.kt             引擎 stdout 日志页
+│   ├── FileOps.kt               openLocalFile / sha256Hex / deleteDownloadFiles
+│   ├── SettingsScreen.kt        设置主从导航：入口列表 + AnimatedContent 钻取六个 tab
+│   ├── SettingsDraft.kt         跨 tab 编辑草稿（rememberSaveable JSON Saver）
+│   ├── SettingsGeneralTab.kt    常规：外观（即时生效）/版本信息/引擎重启
+│   ├── SettingsDownloadsTab.kt  下载：目录+存储授权/会话保存/限速/类型选项/文件分类
+│   ├── SettingsBtTab.kt         BT：做种比/监听端口/tracker/DHT·PEX·LPD
+│   ├── SettingsNetworkTab.kt    网络：TLS 校验/代理/超时/User-Agent
+│   ├── SettingsExtTab.kt        扩展：ext API 端口/token/监听 + 系统级保活深链
+│   ├── SettingsAdvancedTab.kt   高级：RPC endpoint/transport + 自由选项编辑器
+│   ├── SettingsCommon.kt        tab 公共件 + 系统设置深链（电池/全文件访问/通知）
+│   ├── FileCategoryManager.kt   文件分类规则编辑器（RayBurst 移植）
+│   ├── OptionsEditor.kt         aria2 选项编辑器（含 OptionsEditorDialog）
+│   ├── EngineProcess.kt         引擎进程所有权：启停/teardown/ext 队列门面
+│   ├── EngineService.kt         dataSync 前台服务：生命周期所有者 + 通知
+│   ├── ExtensionApi.kt          内嵌 HTTP 服务（ExtApiSpec/PendingAdd/路由）
+│   ├── SettingsRepo.kt          DataStore 设置仓库 + 首启 token 播种
+│   ├── HistoryStore.kt          已完成记录持久化（history.json）
+│   ├── Format.kt / Theme.kt     字节/速度/ETA 格式化；主题
+├── shared/src/commonMain/kotlin/com/slipstream/   （见上图 5 文件）
 ├── extension/                 MV3 扩展 + _locales（en/zh_CN）+ README
 ├── gradle/libs.versions.toml  版本目录（所有依赖版本唯一来源）
 └── .github/workflows/android.yml  CI（build + tag 签名发布）
@@ -133,10 +144,10 @@ startForeground(常驻通知) → wantRunning=true
 
 ## 5. 设置与持久化
 
-- **SettingsRepo**（DataStore "settings"）：`spec: Flow<EngineSpec>`、`extSpec: Flow<ExtApiSpec>`、`themeMode: Flow<Int>` 三路分离——主题与 ext 设置变更不重启引擎。`save()` 单次 edit 写全字段 → 单次发射 → 单次重启。
+- **SettingsRepo**（DataStore "settings"）：`spec: Flow<EngineSpec>`、`extSpec: Flow<ExtApiSpec>`、`categorySpec: Flow<CategorySpec>`、`themeMode: Flow<Int>` 四路分离——主题/ext/文件分类设置变更不重启引擎。`save()`/`saveExt()`/`saveCategories()` 各自单次 edit 写全字段 → 单次发射 → 至多单次重启。
 - **首启播种**：`ensureDefaults()` 对空/blank 的 RPC_TOKEN 与 EXT_TOKEN 各播种 16 字节 SecureRandom hex。幂等（事务 edit），多协程并发调用安全。已持久化的旧值不自动迁移，用户在设置页 token 输入框旁点骰子按钮自行轮换。
 - **EngineSpec.args()**：自定义选项先加载，连接关键参数（daemon/enable-rpc/rpc-secret/rpc-listen-port/dir/session 等）**后置覆盖**，用户选项永远赢不了强制参数；client 与引擎从同一字段解析 endpoint，不会失同步。
-- **HistoryStore**（filesDir/history.json）：aria2 重启即忘 stopped 结果，此 store 把 live 快照中的 COMPLETE/ERROR 实时折入历史（`merge`，异步 IO + Mutex，distinctBy gid，上限 300 条，newest first）。UI 列表 = live + history 按 gid 去重合并（DownloadViewModel.downloads）。`evict(gid)` 供删除/重试编排使用。
+- **HistoryStore**（filesDir/history.json）：aria2 重启即忘 stopped 结果，此 store 把 live 快照中的 COMPLETE/ERROR 实时折入历史（`merge`，`Dispatchers.IO.limitedParallelism(1)` 单线程串行所有读写，distinctBy gid + tombstone 防过期快照复活已删项，上限 300 条，newest first；落盘走 temp 文件 + `Files.move(ATOMIC_MOVE, REPLACE_EXISTING)`，写一半被杀不截断活文件）。UI 列表 = live + history 按 gid 去重合并（DownloadViewModel.downloads）。`evict(gid)` 供删除/重试编排使用。
 - **session 文件**（filesDir/session）：saveSession=true 时 `--input-file`/`--save-session` 指向它，30s 间隔保存；只救未完成任务，不救结果。
 
 ## 6. UI 层（架构级拆分后）
@@ -144,6 +155,7 @@ startForeground(常驻通知) → wantRunning=true
 状态所有权规则：
 - **DownloadViewModel**（AndroidViewModel，经手写 `Factory` 创建——项目未依赖 lifecycle-viewmodel-ktx，`viewModelFactory` DSL 不可用）：选中态、添加/详情/选项/删除对话框态、downloads 合并流（combine + stateIn WhileSubscribed(5000)）、速度采样（上限 60）、全部 RPC 编排。配置变更（旋转）后存活；进程被杀后的恢复（SavedStateHandle）尚未实现。
 - **Composable 本地 remember**：抽屉/导航屏幕态（MainActivity）、添加对话框内的文本/选项草稿、详情对话框的 SHA 进度——生命周期与对话框一致，刻意不进 VM。
+- **SettingsDraft**（rememberSaveable + JSON Saver）：设置页六个 tab 共享一份编辑草稿，跨钻取/旋转存活；Save 时按 flow 分别落盘（见 §5），ext/category 写入绝不触碰引擎 spec。类型化字段从 EngineSpec.customOptions 抽出，剩余键进 residual 仍走 OptionsEditor——空白类型字段不发射，extract→merge 对合规 spec 是恒等映射。
 - **错误面**：VM 的 `rpcOp` = viewModelScope.launch + runCatching + CancellationException 重抛 + `events: SharedFlow<String>`（DROP_OLDEST）；DownloadScreen 收集后 showSnackbar。ext 确认对话框的失败提示仍是 Toast（原样保留）。
 
 编排逻辑位置（改下载行为来这里，不要去 UI 文件）：
@@ -226,7 +238,7 @@ startForeground(常驻通知) → wantRunning=true
 | debug | com.aria2ngnext.debug | 6803 | 6903 | debug key |
 | release | com.aria2ngnext.release | 6802 | 6902 | release.jks（缺失时回退 debug 签名） |
 
-- minSdk 24 / targetSdk 37 / compileSdk 37，Java 21。release 开 minify + shrinkResources。
+- minSdk 34 / targetSdk 37 / compileSdk 37，Java 21。release 开 minify + shrinkResources。
 - `release.jks` / `keystore.properties` / `local.properties` 均 gitignore，从未入库；CI tag 发布从 repo secrets 恢复 keystore。
 - 本地门禁（提交前必跑，取当次真实退出码）：
   ```bash
@@ -237,7 +249,45 @@ startForeground(常驻通知) → wantRunning=true
 - CI（.github/workflows/android.yml）：push main / tag / PR 触发 `ktlintCheck assembleDebug assembleRelease`；`v*` tag 额外签名并发布 GitHub Release。
 - 依赖版本统一走 gradle/libs.versions.toml。注意：lifecycle 只有 viewmodel-compose，**没有 viewmodel-ktx**——新建 ViewModel 工厂用手写 `ViewModelProvider.Factory`（参考 DownloadViewModel.Factory）。
 
-## 12. 维护速查
+## 12. 平台基线与兼容代码盘点
+
+基线：**minSdk 34（Android 14）/ targetSdk 37 / compileSdk 37**。所有设备 ≥ API 34，任何低于 34 的版本分支都是死代码，见到即可删。
+
+### 已退役的兼容写法（不要重新引入）
+
+| 旧写法 | 现状 |
+|---|---|
+| `NotificationCompat` / `NotificationManagerCompat` / `ContextCompat` | 全删。通知用原生 `android.app.Notification.Builder`/`Action.Builder`，`private val nm get() = getSystemService(NotificationManager::class.java)` 统一调用点；`context.startForegroundService(...)` 直连 |
+| `core-splashscreen` 依赖 + `Theme.SplashScreen.*` 主题 | 已删。直接用平台 `android:windowSplashScreen*` attrs（API 31+ 系统原生读取） |
+| `packageManager.getPackageInfo(name, 0)` | `PackageInfoFlags.of(0)`（int-flags 重载 API 33 deprecated） |
+| `getSystemService(Context.X_SERVICE) as X` | `getSystemService(X::class.java)`（API 23+） |
+| `LocalClipboardManager.getText()/setText()` | `LocalClipboard` + suspend `getClipEntry()/setClipEntry(ClipEntry)`（Compose 1.9 起旧接口 deprecated） |
+| `@OptIn(ExperimentalLayoutApi::class)` on FlowRow | 已删（foundation 1.8 毕业；`ExperimentalFoundationApi` combinedClickable 仍实验性，保留） |
+| `Executors.newSingleThreadExecutor().asCoroutineDispatcher()` | `Dispatchers.IO.limitedParallelism(1)` |
+| `File.renameTo` + 手写降级分支 | `Files.move(ATOMIC_MOVE, REPLACE_EXISTING)`——旧 fallback 原地写会重新引入中途截断 bug |
+| `TimeUnit.SECONDS.toNanos` 手写换算 | `N.seconds.inWholeNanoseconds`（`Process.waitFor(5, TimeUnit.SECONDS)` 因签名保留 TimeUnit） |
+| `android:statusBarColor` | 已删：targetSdk 35+ edge-to-edge 强制下是 no-op attr；`enableEdgeToEdge()` 在 MainActivity.onCreate 显式调用 |
+| `ui-tooling-preview` / 显式 `junit` / `kotlin-test` 目录条目 | 已删（无 @Preview；junit 由 kotlin-test-junit 传递带入） |
+| proguard `-keepnames` + `-keep class com.slipstream.**` | 收窄为 `-keep @kotlinx.serialization.Serializable class com.slipstream.**`（序列化静态解析本不需 keep，此为防御层；Manifest 组件与 Compose 入口由 AGP 自动保活） |
+
+### 刻意保留的 API/平台敏感代码（minSdk=34 下仍必需）
+
+| 代码 | 为什么还在 |
+|---|---|
+| `onTimeout` 双签名 | API 34 设备只回调已弃用的单参版，35+ 回调双参——删单参版即在 34 上崩溃；minSdk≥35 才能删 |
+| `PendingIntent.FLAG_IMMUTABLE` | API 23+ 强制，与版本无关的安全要求 |
+| `FileProvider` + `file_paths.xml` | file:// 已禁用；`<root-path>` 宽是 SD 卡副卷的知情权衡（§6） |
+| `network_security_config` loopback 明文豁免 | RPC/ext API 本就明文 HTTP on localhost |
+| `POST_NOTIFICATIONS` 运行时请求 + 各处 `areNotificationsEnabled()` 预判 | API 33+ 权限模型；DownloadScreen 冷启动先 `checkSelfPermission` 再决定是否发请求 |
+| `MANAGE_EXTERNAL_STORAGE` + `Environment.isExternalStorageManager()` | 公共目录下载的存储策略选择，非兼容代码；Play 上架需权限豁免声明 |
+| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` + OEM 深链（含 MIUI 专项） | 厂商碎片化本身，不可平台化 |
+| `useLegacyPackaging = true` | exec() 需要 .so 解压到 nativeLibraryDir |
+| `ConcurrentHashMap` / `kotlin.concurrent.atomics` | commonMain 无 java.util.concurrent 的刻意选择（§9）；新增非 Android target 才动 |
+| `enableOnBackInvokedCallback="true"` | 预测性返回手势契约，非可选 |
+
+经验法则：本仓库里"看着旧"的写法先查这张表再动手——多数是 API 34+ 上仍生效的平台契约，只有 androidx compat 壳和已废弃重载才是可删的。
+
+## 13. 维护速查
 
 | 要做的事 | 落点 |
 |---|---|

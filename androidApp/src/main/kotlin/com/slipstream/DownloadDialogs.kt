@@ -1,11 +1,11 @@
 package com.slipstream
 
+import android.content.ClipData
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,10 +23,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.slipstream.model.Download
@@ -46,7 +46,8 @@ internal fun AddDownloadDialog(
     var text by remember(initialText) { mutableStateOf(initialText) }
     var options by remember(initialText) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var showOptions by remember(initialText) { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val clipScope = rememberCoroutineScope()
 
     // Live "save to" preview: shows the resolved category dir, or the base
     // dir when nothing classifies — hidden for explicit dir / disabled rules.
@@ -81,7 +82,14 @@ internal fun AddDownloadDialog(
                 categoryPreview?.let { DetailRow(stringResource(R.string.detail_dir), it) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = {
-                        clipboard.getText()?.text?.let { text = it }
+                        clipScope.launch {
+                            clipboard
+                                .getClipEntry()
+                                ?.clipData
+                                ?.getItemAt(0)
+                                ?.text
+                                ?.let { text = it.toString() }
+                        }
                     }) { Text(stringResource(R.string.paste)) }
                     TextButton(onClick = onPickTorrent) { Text(stringResource(R.string.pick_torrent)) }
                     TextButton(onClick = { showOptions = true }) {
@@ -120,7 +128,6 @@ internal fun AddDownloadDialog(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun DownloadDetailDialog(
     download: Download,
@@ -129,7 +136,7 @@ internal fun DownloadDetailDialog(
     onRetry: () -> Unit,
 ) {
     val ctx = LocalContext.current
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
     val shaScope = rememberCoroutineScope()
     var shaResult by remember { mutableStateOf<String?>(null) }
     var shaPct by remember { mutableStateOf(-1) } // -1 = idle
@@ -167,7 +174,13 @@ internal fun DownloadDetailDialog(
                     shaResult != null ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.weight(1f)) { DetailRow("SHA-256", shaResult!!) }
-                            TextButton(onClick = { clipboard.setText(AnnotatedString(shaResult!!)) }) {
+                            TextButton(onClick = {
+                                shaResult?.let { result ->
+                                    shaScope.launch {
+                                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("sha256", result)))
+                                    }
+                                }
+                            }) {
                                 Text(stringResource(R.string.copy))
                             }
                         }
@@ -261,7 +274,6 @@ internal fun DownloadDetailDialog(
     )
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun DeleteConfirmDialog(
     count: Int,

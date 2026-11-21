@@ -196,10 +196,12 @@ class SettingsRepo(
     suspend fun setSaveSession(v: Boolean) = context.settingsStore.edit { it[SAVE_SESSION] = v }
 
     companion object {
+        private val secureRandom = java.security.SecureRandom()
+
         /** 16 random bytes as hex — used for first-run seeding and the settings dice button. */
         fun randomToken(): String {
             val bytes = ByteArray(16)
-            java.security.SecureRandom().nextBytes(bytes)
+            secureRandom.nextBytes(bytes)
             return bytes.joinToString("") { "%02x".format(it) }
         }
 

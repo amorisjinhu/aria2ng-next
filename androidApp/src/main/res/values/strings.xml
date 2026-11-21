@@ -107,7 +107,6 @@
     <string name="download_dir">Download directory</string>
     <string name="use_public_download">Use public Download folder</string>
     <string name="storage_warning">⚠ needs All files access</string>
-    <string name="storage_warning_legacy">⚠ needs storage permission</string>
     <string name="check_cert">Verify TLS certificates</string>
     <string name="check_cert_sub">A bundled CA (assets/cacert.pem) is used automatically; without one, verification fails every HTTPS download</string>
     <string name="save_failed">Save failed: %1$s</string>

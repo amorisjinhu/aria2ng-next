@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.coroutineContext
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Owns the embedded aria2-next child process, the RPC client bound to it,
@@ -230,8 +231,8 @@ class EngineProcess private constructor(
         // aborts without throwing, so the old path reported success while
         // nothing appeared. A notification's contentIntent click IS exempt;
         // the file opens when the user taps it.
-        if (!androidx.core.app.NotificationManagerCompat
-                .from(context)
+        if (!context
+                .getSystemService(android.app.NotificationManager::class.java)
                 .areNotificationsEnabled()
         ) {
             return false
@@ -245,7 +246,7 @@ class EngineProcess private constructor(
                         android.content.Intent.FLAG_ACTIVITY_NEW_TASK,
                 )
         val n =
-            androidx.core.app.NotificationCompat
+            android.app.Notification
                 .Builder(context, EngineService.EVENT_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_download)
                 .setContentTitle(f.name)
@@ -262,8 +263,8 @@ class EngineProcess private constructor(
                 .setTimeoutAfter(30_000)
                 .build()
         return runCatching {
-            androidx.core.app.NotificationManagerCompat
-                .from(context)
+            context
+                .getSystemService(android.app.NotificationManager::class.java)
                 .notify(EngineService.REVEAL_NOTIFICATION_ID, n)
         }.isSuccess
     }
@@ -337,7 +338,6 @@ class EngineProcess private constructor(
             if (s.saveSession && !session.exists()) session.createNewFile()
 
             if (isPublicStoragePath(s.dir) &&
-                android.os.Build.VERSION.SDK_INT >= 30 &&
                 !android.os.Environment.isExternalStorageManager()
             ) {
                 appendLog("!! warning: '${s.dir}' is shared storage — grant 'All files access' in settings or downloads will fail")
@@ -386,7 +386,7 @@ class EngineProcess private constructor(
             // Overall budget: 20 × (10s RPC timeout + 300ms) could strand the
             // UI in Starting for ~200s — cap the whole attempt at 60s.
             var attempts = 0
-            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(START_BUDGET_S)
+            val deadline = System.nanoTime() + START_BUDGET_S.seconds.inWholeNanoseconds
             while (attempts++ < 20 && System.nanoTime() < deadline) {
                 try {
                     c.connect()

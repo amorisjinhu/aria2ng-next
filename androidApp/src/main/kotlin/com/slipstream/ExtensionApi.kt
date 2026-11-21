@@ -29,7 +29,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
-import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.seconds
 
 /** Settings for the browser-extension API — app-level, NOT part of EngineSpec (no engine restart). */
 data class ExtApiSpec(
@@ -173,7 +173,7 @@ class ExtensionApiServer(
         // alone resets per read, so a slow-loris drip could hold us forever.
         val input = BufferedInputStream(s.getInputStream(), 8192)
         val out = s.getOutputStream()
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(REQUEST_DEADLINE_S)
+        val deadline = System.nanoTime() + REQUEST_DEADLINE_S.seconds.inWholeNanoseconds
 
         val requestLine = readLineLimited(input, deadline) ?: return
         val parts = requestLine.split(' ')
@@ -259,7 +259,8 @@ class ExtensionApiServer(
                     200,
                     """{"product":"rayburst","protocolVersion":3}""",
                 )
-            method == "GET" && path == "/stat" -> respond(out, 200, statJson())
+
+            method == "GET" && path == "/stat" -> respond(out, 200, statJson().toString())
             method == "GET" && path == "/tasks" -> respond(out, 200, tasksJson())
             method == "POST" && path == "/add" -> handleAdd(input, out, headers, deadline)
             method == "POST" && path == "/pause-all" -> handleAll(out, pause = true)
@@ -484,7 +485,7 @@ class ExtensionApiServer(
     }
 
     /** Rayburst's /stat shape: every counter is a decimal STRING. */
-    private fun statJson(): String {
+    private fun statJson(): JsonObject {
         val stat = engine.manager.globalStat.value
         val stopped =
             engine.manager.downloads.value.count {
@@ -503,7 +504,7 @@ class ExtensionApiServer(
                 engine.history.value.size
                     .toString(),
             )
-        }.toString()
+        }
     }
 
     private fun tasksJson(): String {
@@ -516,11 +517,7 @@ class ExtensionApiServer(
             (all - live.toSet()) +
                 engine.history.value.filterNot { h -> all.any { it.gid == h.gid } }
         return buildJsonObject {
-            put(
-                "stat",
-                kotlinx.serialization.json.Json
-                    .parseToJsonElement(statJson()),
-            )
+            put("stat", statJson())
             put(
                 "tasks",
                 JsonArray(
@@ -600,7 +597,7 @@ class ExtensionApiServer(
                 431 -> "Request Header Fields Too Large"
                 500 -> "Internal Server Error"
                 503 -> "Service Unavailable"
-                else -> "OK"
+                else -> code.toString()
             }
         val bytes = body.toByteArray()
         out.write(

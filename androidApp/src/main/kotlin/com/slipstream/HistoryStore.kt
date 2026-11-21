@@ -2,14 +2,15 @@ package com.slipstream
 
 import com.slipstream.model.Download
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import java.io.File
-import java.util.concurrent.Executors
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /**
  * Persists finished download records (complete/error) to disk.
@@ -33,8 +34,7 @@ class HistoryStore(
 ) {
     private val file = File(filesDir, "history.json")
     private val json = Json { ignoreUnknownKeys = true }
-    private val dispatcher =
-        Executors.newSingleThreadExecutor { r -> Thread(r, "history-store") }.asCoroutineDispatcher()
+    private val dispatcher = Dispatchers.IO.limitedParallelism(1)
     private val tombstones = LinkedHashSet<String>()
 
     private val _history = MutableStateFlow<List<Download>>(emptyList())
@@ -88,21 +88,21 @@ class HistoryStore(
     }
 
     /**
-     * temp+rename: a process kill mid-write can never truncate the live file.
-     * (writeText in place used to leave half a JSON doc → load silently
-     * returned empty → the whole history vanished without a trace.)
+     * temp + atomic move: a process kill mid-write can never truncate the
+     * live file. (writeText in place used to leave half a JSON doc → load
+     * silently returned empty → the whole history vanished without a trace.)
      */
     private fun persist(entries: List<Download>) {
         runCatching {
             val text = json.encodeToString(entries)
             val tmp = File(file.parentFile, "history.json.tmp")
             tmp.writeText(text)
-            if (!tmp.renameTo(file)) {
-                // Same-dir rename is atomic on Linux; this fallback only hits
-                // exotic filesystems where rename-over-existing fails.
-                file.writeText(text)
-                tmp.delete()
-            }
+            Files.move(
+                tmp.toPath(),
+                file.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
         }
     }
 

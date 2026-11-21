@@ -1,10 +1,12 @@
 package com.slipstream
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -49,7 +51,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -59,8 +60,8 @@ class MainActivity : ComponentActivity() {
     private val vm: DownloadViewModel by viewModels { DownloadViewModel.Factory }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val engine = EngineProcess.get(this)
         EngineService.start(this)
 
@@ -217,7 +218,9 @@ private fun AboutDialog(
     val versionName =
         remember {
             runCatching {
-                ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
+                ctx.packageManager
+                    .getPackageInfo(ctx.packageName, PackageManager.PackageInfoFlags.of(0))
+                    .versionName
             }.getOrNull() ?: "?"
         }
     AlertDialog(
